@@ -7,14 +7,13 @@ import {
 } from "@fortawesome/free-solid-svg-icons";
 import { useState, useEffect, useCallback } from "react";
 import {
-  LineChart, Line, BarChart, Bar, XAxis, YAxis,
-  CartesianGrid, Tooltip, ResponsiveContainer,
+  BarChart, Bar, XAxis, YAxis,
+  CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart,
 } from "recharts";
 import "./App.css";
 
 const API = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
-// Handle email verification from URL
 const urlParams = new URLSearchParams(window.location.search);
 const verifyToken = urlParams.get("token");
 if (verifyToken) {
@@ -38,15 +37,16 @@ const apiFetch = async (path: string, options?: RequestInit) => {
   return data;
 };
 
-interface User { id: string; fullName: string; email: string; phone: string }
+interface User { id: string; fullName: string; email: string; phone: string; username: string }
 interface Transaction {
   id: string; type: string; amount: number; description: string;
   status: string; mpesaRef?: string; counterparty?: string; createdAt: string;
 }
-interface Notification { id: string; message: string; isRead: boolean; createdAt: string }
+interface Notification { id: string; message: string; isRead: boolean; createdAt: string; type?: string }
 interface Reward { id: string; redeemed: boolean; reward: { name: string; description: string; points: number; type: string } }
+interface Limits { dailyLimit: number | null; monthlyLimit: number | null }
 
-// ─── Modal Component ─────────────────────────────────────────
+// ─── Modal ───────────────────────────────────────────────────
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -64,7 +64,7 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
 // ─── Auth Screen ─────────────────────────────────────────────
 function AuthScreen({ onAuth }: { onAuth: (token: string, user: User) => void }) {
   const [mode, setMode] = useState<"login" | "register" | "forgot">("login");
-  const [form, setForm] = useState({ fullName: "", email: "", phone: "", password: "" });
+  const [form, setForm] = useState({ fullName: "", email: "", phone: "", username: "", password: "" });
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -90,9 +90,7 @@ function AuthScreen({ onAuth }: { onAuth: (token: string, user: User) => void })
       }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Something went wrong");
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   };
 
   return (
@@ -108,10 +106,12 @@ function AuthScreen({ onAuth }: { onAuth: (token: string, user: User) => void })
         )}
         <input className="auth-input" placeholder="Email" type="email"
           value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} />
-        {mode === "register" && (
+        {mode === "register" && (<>
           <input className="auth-input" placeholder="Phone (e.g. 0712345678)"
             value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} />
-        )}
+          <input className="auth-input" placeholder="Username (e.g. john_doe)"
+            value={form.username} onChange={e => setForm({ ...form, username: e.target.value })} />
+        </>)}
         {mode !== "forgot" && (
           <input className="auth-input" placeholder="Password" type="password"
             value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} />
@@ -144,7 +144,6 @@ export default function App() {
   const [active, setActive] = useState("Dashboard");
   const [collapsed, setCollapsed] = useState(true);
 
-  // Data state
   const [balance, setBalance] = useState<number | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -153,23 +152,24 @@ export default function App() {
   const [analytics, setAnalytics] = useState<{
     summary: Record<string, number | string>;
     dailySpending: { date: string; amount: number }[];
-    monthlySpending: { month: string; amount: number }[]
+    monthlySpending: { month: string; amount: number }[];
   } | null>(null);
   const [profile, setProfile] = useState<User | null>(null);
+  const [limits, setLimits] = useState<Limits>({ dailyLimit: null, monthlyLimit: null });
+  const [limitsForm, setLimitsForm] = useState({ dailyLimit: "", monthlyLimit: "" });
 
-  // Modal state
-  const [modal, setModal] = useState<"deposit" | "withdraw" | "send" | "request" | null>(null);
-  const [depositAmount, setDepositAmount] = useState("");
-  const [withdrawAmount, setWithdrawAmount] = useState("");
-  const [sendForm, setSendForm] = useState({ phone: "", amount: "", note: "" });
-  const [requestForm, setRequestForm] = useState({ phone: "", amount: "", note: "" });
-  const [profileForm, setProfileForm] = useState({ fullName: "", phone: "" });
+  const [modal, setModal] = useState<"send" | "request" | null>(null);
+  const [sendForm, setSendForm] = useState({ username: "", amount: "", note: "" });
+  const [requestForm, setRequestForm] = useState({ username: "", amount: "", note: "" });
+  const [profileForm, setProfileForm] = useState({ fullName: "", phone: "", username: "" });
   const [securityForm, setSecurityForm] = useState({ currentPassword: "", newPassword: "" });
 
-  // UI state
   const [loading, setLoading] = useState<Record<string, boolean>>({});
   const [msg, setMsg] = useState<Record<string, string>>({});
   const [depositStep, setDepositStep] = useState<"idle" | "processing" | "done">("idle");
+  const [withdrawStep, setWithdrawStep] = useState<"idle" | "processing" | "done">("idle");
+  const [depositAmount, setDepositAmount] = useState("");
+  const [withdrawAmount, setWithdrawAmount] = useState("");
 
   const setL = (key: string, val: boolean) => setLoading(p => ({ ...p, [key]: val }));
   const setM = (key: string, val: string) => setMsg(p => ({ ...p, [key]: val }));
@@ -202,7 +202,18 @@ export default function App() {
     try {
       const d = await apiFetch("/settings/profile");
       setProfile(d.user);
-      setProfileForm({ fullName: d.user.fullName, phone: d.user.phone });
+      setProfileForm({ fullName: d.user.fullName, phone: d.user.phone, username: d.user.username });
+    } catch {}
+  }, []);
+
+  const fetchLimits = useCallback(async () => {
+    try {
+      const d = await apiFetch("/settings/limits");
+      setLimits(d);
+      setLimitsForm({
+        dailyLimit: d.dailyLimit ? String(d.dailyLimit) : "",
+        monthlyLimit: d.monthlyLimit ? String(d.monthlyLimit) : "",
+      });
     } catch {}
   }, []);
 
@@ -214,12 +225,13 @@ export default function App() {
   useEffect(() => {
     if (active === "Analytics") fetchAnalytics();
     if (active === "Rewards") fetchRewards();
-    if (active === "Settings") fetchProfile();
+    if (active === "Settings") { fetchProfile(); fetchLimits(); }
     if (active === "Notifications") {
       fetchNotifications();
+      setUnreadCount(0);
       apiFetch("/notifications/mark-all-read", { method: "PATCH" }).catch(() => {});
     }
-  }, [active, fetchAnalytics, fetchRewards, fetchProfile, fetchNotifications]);
+  }, [active, fetchAnalytics, fetchRewards, fetchProfile, fetchLimits, fetchNotifications]);
 
   const handleAuth = (t: string, u: User) => { setToken(t); setUser(u); };
 
@@ -236,7 +248,7 @@ export default function App() {
     setDepositStep("processing");
     setM("deposit", "");
     try {
-      await new Promise(r => setTimeout(r, 5000)); // 5 second simulation
+      await new Promise(r => setTimeout(r, 8000));
       await apiFetch("/mpesa/deposit", {
         method: "POST",
         body: JSON.stringify({ amount: Number(depositAmount) }),
@@ -244,10 +256,8 @@ export default function App() {
       setDepositStep("done");
       setM("deposit", `KES ${Number(depositAmount).toLocaleString()} deposited successfully!`);
       setDepositAmount("");
-      await fetchBalance();
-      await fetchTransactions();
-      await fetchNotifications();
-      setTimeout(() => { setModal(null); setDepositStep("idle"); setM("deposit", ""); }, 2000);
+      await fetchBalance(); await fetchTransactions(); await fetchNotifications();
+      setTimeout(() => { setActive("Dashboard"); setDepositStep("idle"); setM("deposit", ""); }, 2000);
     } catch (e: unknown) {
       setDepositStep("idle");
       setM("deposit", e instanceof Error ? e.message : "Deposit failed");
@@ -257,37 +267,37 @@ export default function App() {
   // ─── Withdraw ────────────────────────────────────────────
   const handleWithdraw = async () => {
     if (!withdrawAmount) return;
-    setL("withdraw", true); setM("withdraw", "");
+    setWithdrawStep("processing");
+    setM("withdraw", "");
     try {
+      await new Promise(r => setTimeout(r, 5000));
       const d = await apiFetch("/mpesa/withdraw", {
         method: "POST",
         body: JSON.stringify({ amount: Number(withdrawAmount) }),
       });
+      setWithdrawStep("done");
       setM("withdraw", d.message);
       setWithdrawAmount("");
-      await fetchBalance();
-      await fetchTransactions();
-      await fetchNotifications();
-      setTimeout(() => { setModal(null); setM("withdraw", ""); }, 2000);
+      await fetchBalance(); await fetchTransactions(); await fetchNotifications();
+      setTimeout(() => { setActive("Dashboard"); setWithdrawStep("idle"); setM("withdraw", ""); }, 2000);
     } catch (e: unknown) {
+      setWithdrawStep("idle");
       setM("withdraw", e instanceof Error ? e.message : "Withdrawal failed");
-    } finally { setL("withdraw", false); }
+    }
   };
 
   // ─── Send ────────────────────────────────────────────────
   const handleSend = async () => {
-    if (!sendForm.phone || !sendForm.amount) return;
+    if (!sendForm.username || !sendForm.amount) return;
     setL("send", true); setM("send", "");
     try {
       const d = await apiFetch("/transactions/send", {
         method: "POST",
-        body: JSON.stringify({ phone: sendForm.phone, amount: Number(sendForm.amount), note: sendForm.note }),
+        body: JSON.stringify({ username: sendForm.username, amount: Number(sendForm.amount), note: sendForm.note }),
       });
       setM("send", d.message);
-      setSendForm({ phone: "", amount: "", note: "" });
-      await fetchBalance();
-      await fetchTransactions();
-      await fetchNotifications();
+      setSendForm({ username: "", amount: "", note: "" });
+      await fetchBalance(); await fetchTransactions(); await fetchNotifications();
       setTimeout(() => { setModal(null); setM("send", ""); }, 2000);
     } catch (e: unknown) {
       setM("send", e instanceof Error ? e.message : "Send failed");
@@ -296,15 +306,15 @@ export default function App() {
 
   // ─── Request ─────────────────────────────────────────────
   const handleRequest = async () => {
-    if (!requestForm.phone || !requestForm.amount) return;
+    if (!requestForm.username || !requestForm.amount) return;
     setL("request", true); setM("request", "");
     try {
       const d = await apiFetch("/transactions/request", {
         method: "POST",
-        body: JSON.stringify({ phone: requestForm.phone, amount: Number(requestForm.amount), note: requestForm.note }),
+        body: JSON.stringify({ username: requestForm.username, amount: Number(requestForm.amount), note: requestForm.note }),
       });
       setM("request", d.message);
-      setRequestForm({ phone: "", amount: "", note: "" });
+      setRequestForm({ username: "", amount: "", note: "" });
       setTimeout(() => { setModal(null); setM("request", ""); }, 2000);
     } catch (e: unknown) {
       setM("request", e instanceof Error ? e.message : "Request failed");
@@ -345,6 +355,23 @@ export default function App() {
     } finally { setL("security", false); }
   };
 
+  const handleUpdateLimits = async () => {
+    setL("limits", true); setM("limits", "");
+    try {
+      await apiFetch("/settings/limits", {
+        method: "PATCH",
+        body: JSON.stringify({
+          dailyLimit: limitsForm.dailyLimit ? Number(limitsForm.dailyLimit) : null,
+          monthlyLimit: limitsForm.monthlyLimit ? Number(limitsForm.monthlyLimit) : null,
+        }),
+      });
+      setM("limits", "Spending limits updated successfully!");
+      fetchLimits(); fetchNotifications();
+    } catch (e: unknown) {
+      setM("limits", e instanceof Error ? e.message : "Update failed");
+    } finally { setL("limits", false); }
+  };
+
   const handlePrintReceipt = (tx: Transaction) => {
     const win = window.open("", "_blank");
     if (!win) return;
@@ -365,10 +392,9 @@ export default function App() {
           <tr><td><b>Amount</b></td><td class="amount">KES ${tx.amount.toLocaleString()}</td></tr>
           <tr><td><b>Description</b></td><td>${tx.description}</td></tr>
           <tr><td><b>Status</b></td><td>${tx.status}</td></tr>
-          <tr><td><b>M-Pesa Ref</b></td><td>${tx.mpesaRef || "N/A"}</td></tr>
           <tr><td><b>Date</b></td><td>${new Date(tx.createdAt).toLocaleString("en-KE")}</td></tr>
           <tr><td><b>Account</b></td><td>${user?.fullName || ""}</td></tr>
-          <tr><td><b>Phone</b></td><td>${user?.phone || ""}</td></tr>
+          <tr><td><b>Username</b></td><td>@${user?.username || ""}</td></tr>
         </table>
         <p style="text-align:center;margin-top:20px;opacity:0.5;font-size:12px;">NAFAKA Digital Wallet © 2026</p>
         <script>window.print()</script>
@@ -386,63 +412,23 @@ export default function App() {
     <div className="app" onClick={() => menuOpen && setMenuOpen(false)}>
 
       {/* MODALS */}
-      {modal === "deposit" && (
-        <Modal title="Deposit via M-Pesa" onClose={() => { setModal(null); setDepositStep("idle"); setM("deposit", ""); }}>
-          {depositStep === "idle" && (<>
-            <input className="wallet-input" type="number" placeholder="Amount (KES)"
-              value={depositAmount} onChange={e => setDepositAmount(e.target.value)} />
-            <button className="modal-btn" onClick={handleDeposit} disabled={!depositAmount}>
-              Deposit
-            </button>
-            {msg.deposit && <p className="form-error">{msg.deposit}</p>}
-          </>)}
-          {depositStep === "processing" && (
-            <div className="modal-processing">
-              <FontAwesomeIcon icon={faSpinner} spin style={{ fontSize: "32px", color: "#3b82f6" }} />
-              <p>Processing your deposit...</p>
-              <p style={{ opacity: 0.5, fontSize: "13px" }}>Please wait</p>
-            </div>
-          )}
-          {depositStep === "done" && (
-            <div className="modal-processing">
-              <p className="form-success" style={{ fontSize: "16px" }}>✅ {msg.deposit}</p>
-            </div>
-          )}
-        </Modal>
-      )}
-
-      {modal === "withdraw" && (
-        <Modal title="Withdraw to M-Pesa" onClose={() => { setModal(null); setM("withdraw", ""); }}>
-          {!msg.withdraw ? (<>
-            <input className="wallet-input" type="number" placeholder="Amount (KES)"
-              value={withdrawAmount} onChange={e => setWithdrawAmount(e.target.value)} />
-            <p style={{ fontSize: "13px", opacity: 0.6 }}>Available: KES {balance?.toLocaleString() || 0}</p>
-            <button className="modal-btn" onClick={handleWithdraw} disabled={loading.withdraw || !withdrawAmount}>
-              {loading.withdraw ? <FontAwesomeIcon icon={faSpinner} spin /> : "Withdraw"}
-            </button>
-          </>) : (
-            <div className="modal-processing">
-              <p className="form-success" style={{ fontSize: "15px" }}>✅ {msg.withdraw}</p>
-            </div>
-          )}
-        </Modal>
-      )}
-
       {modal === "send" && (
-        <Modal title="Send Money" onClose={() => { setModal(null); setM("send", ""); }}>
+        <Modal title="Send Money" onClose={() => { setModal(null); setM("send", ""); setSendForm({ username: "", amount: "", note: "" }); }}>
           {!msg.send ? (<>
-            <input className="wallet-input" placeholder="Recipient Phone (e.g. 0712345678)"
-              value={sendForm.phone} onChange={e => setSendForm({ ...sendForm, phone: e.target.value })} />
+            <div style={{ fontSize: "13px", opacity: 0.6, marginBottom: "5px" }}>
+              Enter the recipient's NAFAKA username e.g. @john_doe
+            </div>
+            <input className="wallet-input" placeholder="@username"
+              value={sendForm.username} onChange={e => setSendForm({ ...sendForm, username: e.target.value })} />
             <input className="wallet-input" type="number" placeholder="Amount (KES)"
               value={sendForm.amount} onChange={e => setSendForm({ ...sendForm, amount: e.target.value })} />
             <input className="wallet-input" placeholder="Note (optional)"
               value={sendForm.note} onChange={e => setSendForm({ ...sendForm, note: e.target.value })} />
             <p style={{ fontSize: "13px", opacity: 0.6 }}>Available: KES {balance?.toLocaleString() || 0}</p>
             {msg.send && <p className="form-error">{msg.send}</p>}
-            <button className="modal-btn" onClick={handleSend} disabled={loading.send || !sendForm.phone || !sendForm.amount}>
-              {loading.send ? <FontAwesomeIcon icon={faSpinner} spin /> : <>
-                <FontAwesomeIcon icon={faPaperPlane} /> Send
-              </>}
+            <button className="modal-btn" onClick={handleSend}
+              disabled={loading.send || !sendForm.username || !sendForm.amount}>
+              {loading.send ? <FontAwesomeIcon icon={faSpinner} spin /> : <><FontAwesomeIcon icon={faPaperPlane} /> Send</>}
             </button>
           </>) : (
             <div className="modal-processing">
@@ -453,19 +439,21 @@ export default function App() {
       )}
 
       {modal === "request" && (
-        <Modal title="Request Money" onClose={() => { setModal(null); setM("request", ""); }}>
+        <Modal title="Request Money" onClose={() => { setModal(null); setM("request", ""); setRequestForm({ username: "", amount: "", note: "" }); }}>
           {!msg.request ? (<>
-            <input className="wallet-input" placeholder="Their Phone (e.g. 0712345678)"
-              value={requestForm.phone} onChange={e => setRequestForm({ ...requestForm, phone: e.target.value })} />
+            <div style={{ fontSize: "13px", opacity: 0.6, marginBottom: "5px" }}>
+              Enter the NAFAKA username of who you want to request from
+            </div>
+            <input className="wallet-input" placeholder="@username"
+              value={requestForm.username} onChange={e => setRequestForm({ ...requestForm, username: e.target.value })} />
             <input className="wallet-input" type="number" placeholder="Amount (KES)"
               value={requestForm.amount} onChange={e => setRequestForm({ ...requestForm, amount: e.target.value })} />
             <input className="wallet-input" placeholder="Note (optional)"
               value={requestForm.note} onChange={e => setRequestForm({ ...requestForm, note: e.target.value })} />
             {msg.request && <p className="form-error">{msg.request}</p>}
-            <button className="modal-btn" onClick={handleRequest} disabled={loading.request || !requestForm.phone || !requestForm.amount}>
-              {loading.request ? <FontAwesomeIcon icon={faSpinner} spin /> : <>
-                <FontAwesomeIcon icon={faHandHoldingUsd} /> Request
-              </>}
+            <button className="modal-btn" onClick={handleRequest}
+              disabled={loading.request || !requestForm.username || !requestForm.amount}>
+              {loading.request ? <FontAwesomeIcon icon={faSpinner} spin /> : <><FontAwesomeIcon icon={faHandHoldingUsd} /> Request</>}
             </button>
           </>) : (
             <div className="modal-processing">
@@ -483,7 +471,7 @@ export default function App() {
         </div>
         <div className="right">
           <div className="topbar-icon" title="Notifications"
-            onClick={e => { e.stopPropagation(); setActive("Notifications"); setUnreadCount(0); }}>
+            onClick={e => { e.stopPropagation(); setActive("Notifications"); }}>
             <FontAwesomeIcon icon={faBell} />
             {unreadCount > 0 && <span className="badge">{unreadCount}</span>}
           </div>
@@ -528,7 +516,7 @@ export default function App() {
               <div>
                 <p className="label">Available Balance</p>
                 <h2>{balance !== null ? `KES ${balance.toLocaleString()}` : "Loading..."}</h2>
-                <span className="sub">Hi, {user?.fullName?.split(" ")[0]} 👋</span>
+                <span className="sub">Hi, {user?.fullName?.split(" ")[0]} 👋 · @{user?.username}</span>
               </div>
             </section>
 
@@ -539,10 +527,10 @@ export default function App() {
               <div className="action-card" onClick={() => setModal("request")}>
                 <FontAwesomeIcon icon={faArrowDown} /><span>Request</span>
               </div>
-              <div className="action-card" onClick={() => setModal("deposit")}>
+              <div className="action-card" onClick={() => setActive("Wallet")}>
                 <FontAwesomeIcon icon={faMobileAlt} /><span>Deposit</span>
               </div>
-              <div className="action-card" onClick={() => setModal("withdraw")}>
+              <div className="action-card" onClick={() => setActive("Wallet")}>
                 <FontAwesomeIcon icon={faMoneyBillWave} /><span>Withdraw</span>
               </div>
             </section>
@@ -574,15 +562,19 @@ export default function App() {
                 <h3>Spending Overview</h3>
                 {analytics?.dailySpending && analytics.dailySpending.length > 0 ? (
                   <ResponsiveContainer width="100%" height={150}>
-                    <LineChart data={analytics.dailySpending}>
-                      <Line type="monotone" dataKey="amount" stroke="#3b82f6" strokeWidth={2} dot={false} />
-                      <Tooltip contentStyle={{ background: "#020617", border: "none" }} />
-                    </LineChart>
+                    <AreaChart data={analytics.dailySpending}>
+                      <defs>
+                        <linearGradient id="colorSpend" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
+                          <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <Area type="monotone" dataKey="amount" stroke="#3b82f6" fill="url(#colorSpend)" strokeWidth={2} />
+                      <Tooltip contentStyle={{ background: "#020617", border: "none", fontSize: "12px" }} />
+                    </AreaChart>
                   </ResponsiveContainer>
                 ) : (
-                  <div className="chart-placeholder" onClick={() => setActive("Analytics")}>
-                    Click to view Analytics →
-                  </div>
+                  <div className="chart-placeholder">Click to view Analytics →</div>
                 )}
               </div>
             </section>
@@ -592,13 +584,63 @@ export default function App() {
         {/* WALLET */}
         {active === "Wallet" && (
           <section className="wallet-section">
-            <h2>Wallet Overview</h2>
-            <div className="wallet-cards">
-              <div className="wallet-card">
-                <h3>Main Wallet</h3>
-                <p>{balance !== null ? `KES ${balance.toLocaleString()}` : "Loading..."}</p>
-                <button onClick={() => setModal("deposit")}>Deposit</button>
-                <button onClick={() => setModal("withdraw")}>Withdraw</button>
+            <h2>Wallet</h2>
+            <div className="wallet-balance-card">
+              <p className="label">Available Balance</p>
+              <h2>{balance !== null ? `KES ${balance.toLocaleString()}` : "Loading..."}</h2>
+              <span className="sub">@{user?.username}</span>
+            </div>
+
+            <div className="wallet-actions-grid">
+              {/* DEPOSIT */}
+              <div className="wallet-action-card">
+                <h3><FontAwesomeIcon icon={faMobileAlt} /> Deposit via M-Pesa</h3>
+                {depositStep === "idle" && (<>
+                  <input className="wallet-input" type="number" placeholder="Amount (KES)"
+                    value={depositAmount} onChange={e => setDepositAmount(e.target.value)} />
+                  {msg.deposit && <p className="form-error">{msg.deposit}</p>}
+                  <button className="wallet-action-btn deposit-btn" onClick={handleDeposit} disabled={!depositAmount}>
+                    Deposit
+                  </button>
+                </>)}
+                {depositStep === "processing" && (
+                  <div className="wallet-processing">
+                    <FontAwesomeIcon icon={faSpinner} spin style={{ fontSize: "28px", color: "#3b82f6" }} />
+                    <p>Processing deposit...</p>
+                    <p style={{ opacity: 0.5, fontSize: "12px" }}>This may take a moment</p>
+                  </div>
+                )}
+                {depositStep === "done" && (
+                  <div className="wallet-processing">
+                    <p className="form-success" style={{ fontSize: "16px" }}>✅ {msg.deposit}</p>
+                  </div>
+                )}
+              </div>
+
+              {/* WITHDRAW */}
+              <div className="wallet-action-card">
+                <h3><FontAwesomeIcon icon={faMoneyBillWave} /> Withdraw to M-Pesa</h3>
+                {withdrawStep === "idle" && (<>
+                  <input className="wallet-input" type="number" placeholder="Amount (KES)"
+                    value={withdrawAmount} onChange={e => setWithdrawAmount(e.target.value)} />
+                  <p style={{ fontSize: "13px", opacity: 0.6 }}>Available: KES {balance?.toLocaleString() || 0}</p>
+                  {msg.withdraw && <p className="form-error">{msg.withdraw}</p>}
+                  <button className="wallet-action-btn withdraw-btn" onClick={handleWithdraw} disabled={!withdrawAmount}>
+                    Withdraw
+                  </button>
+                </>)}
+                {withdrawStep === "processing" && (
+                  <div className="wallet-processing">
+                    <FontAwesomeIcon icon={faSpinner} spin style={{ fontSize: "28px", color: "#9333ea" }} />
+                    <p>Processing withdrawal...</p>
+                    <p style={{ opacity: 0.5, fontSize: "12px" }}>Sending to your M-Pesa</p>
+                  </div>
+                )}
+                {withdrawStep === "done" && (
+                  <div className="wallet-processing">
+                    <p className="form-success" style={{ fontSize: "16px" }}>✅ {msg.withdraw}</p>
+                  </div>
+                )}
               </div>
             </div>
           </section>
@@ -645,27 +687,39 @@ export default function App() {
                 <div className="card">
                   <h3>Daily Spending</h3>
                   {analytics.dailySpending.length > 0 ? (
-                    <ResponsiveContainer width="100%" height={180}>
-                      <LineChart data={analytics.dailySpending}>
+                    <ResponsiveContainer width="100%" height={200}>
+                      <AreaChart data={analytics.dailySpending}>
+                        <defs>
+                          <linearGradient id="dailyGrad" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.4} />
+                            <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                          </linearGradient>
+                        </defs>
                         <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
                         <XAxis dataKey="date" tick={{ fill: "#94a3b8", fontSize: 10 }} />
                         <YAxis tick={{ fill: "#94a3b8", fontSize: 10 }} />
-                        <Tooltip contentStyle={{ background: "#020617", border: "none" }} />
-                        <Line type="monotone" dataKey="amount" stroke="#3b82f6" strokeWidth={2} dot={false} />
-                      </LineChart>
+                        <Tooltip contentStyle={{ background: "#020617", border: "1px solid #1e293b", borderRadius: "8px" }} />
+                        <Area type="monotone" dataKey="amount" stroke="#3b82f6" fill="url(#dailyGrad)" strokeWidth={2} />
+                      </AreaChart>
                     </ResponsiveContainer>
-                  ) : <div className="chart-placeholder">No spending data yet</div>}
+                  ) : <div className="chart-placeholder">No spending data yet — make some transactions!</div>}
                 </div>
                 <div className="card">
                   <h3>Monthly Spending</h3>
                   {analytics.monthlySpending.length > 0 ? (
-                    <ResponsiveContainer width="100%" height={180}>
+                    <ResponsiveContainer width="100%" height={200}>
                       <BarChart data={analytics.monthlySpending}>
+                        <defs>
+                          <linearGradient id="barGrad" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#9333ea" stopOpacity={1} />
+                            <stop offset="100%" stopColor="#1d4ed8" stopOpacity={1} />
+                          </linearGradient>
+                        </defs>
                         <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
                         <XAxis dataKey="month" tick={{ fill: "#94a3b8", fontSize: 10 }} />
                         <YAxis tick={{ fill: "#94a3b8", fontSize: 10 }} />
-                        <Tooltip contentStyle={{ background: "#020617", border: "none" }} />
-                        <Bar dataKey="amount" fill="#9333ea" radius={[4, 4, 0, 0]} />
+                        <Tooltip contentStyle={{ background: "#020617", border: "1px solid #1e293b", borderRadius: "8px" }} />
+                        <Bar dataKey="amount" fill="url(#barGrad)" radius={[6, 6, 0, 0]} />
                       </BarChart>
                     </ResponsiveContainer>
                   ) : <div className="chart-placeholder">No monthly data yet</div>}
@@ -684,10 +738,9 @@ export default function App() {
                 <div key={ur.id} className="reward-card">
                   <h3>{ur.reward.name}</h3>
                   <p>{ur.reward.description}</p>
-                  <p style={{ color: "#3b82f6", fontSize: "13px" }}>
+                  <p style={{ color: "#3b82f6", fontSize: "13px", marginBottom: "10px" }}>
                     {ur.reward.type === "POINTS" ? `${ur.reward.points} pts → KES ${Math.floor(ur.reward.points / 100)}` :
-                      ur.reward.type === "REFERRAL" ? `KES ${ur.reward.points}` :
-                        "5% of your total deposits"}
+                      ur.reward.type === "REFERRAL" ? `KES ${ur.reward.points}` : "5% of your total deposits"}
                   </p>
                   {msg[`reward-${ur.id}`] && (
                     <p className={msg[`reward-${ur.id}`].includes("Failed") ? "form-error" : "form-success"}>
@@ -712,17 +765,42 @@ export default function App() {
             <div className="back-arrow" onClick={goBack}><FontAwesomeIcon icon={faArrowLeft} /> Back</div>
             <h2>Settings</h2>
             <div className="settings-list">
+
               <div className="setting-item setting-form">
                 <h4>Profile</h4>
                 <input className="wallet-input" placeholder="Full Name"
                   value={profileForm.fullName} onChange={e => setProfileForm({ ...profileForm, fullName: e.target.value })} />
                 <input className="wallet-input" placeholder="Phone"
                   value={profileForm.phone} onChange={e => setProfileForm({ ...profileForm, phone: e.target.value })} />
+                <input className="wallet-input" placeholder="Username"
+                  value={profileForm.username} onChange={e => setProfileForm({ ...profileForm, username: e.target.value })} />
                 {msg.profile && <p className="form-success">{msg.profile}</p>}
                 <button onClick={handleUpdateProfile} disabled={loading.profile}>
                   {loading.profile ? "Saving..." : "Save Profile"}
                 </button>
               </div>
+
+              <div className="setting-item setting-form">
+                <h4>Spending Limits</h4>
+                <p style={{ fontSize: "13px", opacity: 0.6, margin: "0 0 10px 0" }}>
+                  Set limits to control your daily and monthly spending. Leave empty to remove a limit.
+                </p>
+                {limits.dailyLimit && (
+                  <p style={{ fontSize: "13px", color: "#3b82f6" }}>Current daily limit: KES {limits.dailyLimit.toLocaleString()}</p>
+                )}
+                {limits.monthlyLimit && (
+                  <p style={{ fontSize: "13px", color: "#3b82f6" }}>Current monthly limit: KES {limits.monthlyLimit.toLocaleString()}</p>
+                )}
+                <input className="wallet-input" type="number" placeholder="Daily Limit (KES)"
+                  value={limitsForm.dailyLimit} onChange={e => setLimitsForm({ ...limitsForm, dailyLimit: e.target.value })} />
+                <input className="wallet-input" type="number" placeholder="Monthly Limit (KES)"
+                  value={limitsForm.monthlyLimit} onChange={e => setLimitsForm({ ...limitsForm, monthlyLimit: e.target.value })} />
+                {msg.limits && <p className="form-success">{msg.limits}</p>}
+                <button onClick={handleUpdateLimits} disabled={loading.limits}>
+                  {loading.limits ? "Saving..." : "Save Limits"}
+                </button>
+              </div>
+
               <div className="setting-item setting-form">
                 <h4>Security — Change Password</h4>
                 <input className="wallet-input" type="password" placeholder="Current Password"
@@ -734,6 +812,7 @@ export default function App() {
                   {loading.security ? "Updating..." : "Update Password"}
                 </button>
               </div>
+
               <div className="setting-item">
                 <span>Email</span>
                 <span style={{ opacity: 0.6 }}>{profile?.email}</span>
@@ -753,8 +832,14 @@ export default function App() {
             <h2>Notifications</h2>
             <div className="notifications-list">
               {notifications.map(n => (
-                <div key={n.id} className={`notification-item ${!n.isRead ? "unread" : ""}`}>
-                  <p>{n.message}</p>
+                <div key={n.id} className={`notification-item ${!n.isRead ? "unread" : ""} notification-${n.type?.toLowerCase() || "info"}`}
+                  onClick={() => { if (n.type === "TRANSACTION" || n.type === "REQUEST") setActive("Transactions"); }}>
+                  <div>
+                    <p>{n.message}</p>
+                    {(n.type === "TRANSACTION" || n.type === "REQUEST") && (
+                      <span style={{ color: "#3b82f6", fontSize: "12px" }}>View in Transactions →</span>
+                    )}
+                  </div>
                   <span>{new Date(n.createdAt).toLocaleDateString("en-KE")}</span>
                 </div>
               ))}
@@ -795,11 +880,12 @@ export default function App() {
           <div className="back-arrow" onClick={goBack}><FontAwesomeIcon icon={faArrowLeft} /> Back</div>
           <h2>Help Center</h2>
           <div className="help-list">
-            <div className="help-item"><h4>How do I deposit money?</h4><p>Click the Deposit button on your dashboard, enter the amount and confirm. Funds are credited instantly to your NAFAKA wallet.</p></div>
+            <div className="help-item"><h4>How do I deposit money?</h4><p>Click the Deposit button on your dashboard or wallet page, enter the amount and confirm. Funds are credited to your NAFAKA wallet.</p></div>
             <div className="help-item"><h4>How do I withdraw money?</h4><p>Click the Withdraw button, enter the amount and confirm. Funds will be sent to your registered M-Pesa number.</p></div>
-            <div className="help-item"><h4>How do I send money to another user?</h4><p>Click Send on your dashboard, enter the recipient's phone number registered on NAFAKA, enter the amount and confirm.</p></div>
-            <div className="help-item"><h4>How do I request money?</h4><p>Click Request on your dashboard, enter the phone number of the NAFAKA user you want to request from and the amount.</p></div>
-            <div className="help-item"><h4>How do rewards work?</h4><p>NAFAKA rewards you for using the platform. Visit the Rewards page to see available rewards and redeem them for cash in your wallet.</p></div>
+            <div className="help-item"><h4>How do I send money to another user?</h4><p>Click Send on your dashboard, enter the recipient's NAFAKA username (e.g. @john_doe), enter the amount and confirm.</p></div>
+            <div className="help-item"><h4>How do I request money?</h4><p>Click Request on your dashboard, enter the NAFAKA username of the person you want to request from and the amount.</p></div>
+            <div className="help-item"><h4>How do spending limits work?</h4><p>Go to Settings → Spending Limits to set daily and monthly limits. You will be notified when you reach 80% of your limit.</p></div>
+            <div className="help-item"><h4>How do rewards work?</h4><p>Visit the Rewards page to see available rewards and redeem them for cash credited directly to your wallet.</p></div>
           </div>
         </div>
       )}
@@ -812,9 +898,10 @@ export default function App() {
             <div className="help-item"><h4>Is NAFAKA safe?</h4><p>Yes. NAFAKA uses industry-standard encryption and JWT authentication to keep your account and funds secure.</p></div>
             <div className="help-item"><h4>Are there transaction fees?</h4><p>NAFAKA currently charges no fees on deposits, withdrawals or transfers between users.</p></div>
             <div className="help-item"><h4>What is the minimum deposit?</h4><p>The minimum deposit amount is KES 1.</p></div>
-            <div className="help-item"><h4>How long do withdrawals take?</h4><p>Withdrawals are processed instantly and funds are sent to your M-Pesa within minutes.</p></div>
-            <div className="help-item"><h4>Can I use NAFAKA without M-Pesa?</h4><p>Yes. You can send and receive money between NAFAKA users without using M-Pesa.</p></div>
-            <div className="help-item"><h4>How do I reset my password?</h4><p>Click "Forgot password?" on the login page and follow the instructions sent to your email.</p></div>
+            <div className="help-item"><h4>How long do withdrawals take?</h4><p>Withdrawals are processed and funds are sent to your M-Pesa within minutes.</p></div>
+            <div className="help-item"><h4>Can I use NAFAKA without M-Pesa?</h4><p>Yes. You can send and receive money between NAFAKA users using only your username — no M-Pesa needed.</p></div>
+            <div className="help-item"><h4>What is my NAFAKA username?</h4><p>Your username is your unique identifier on NAFAKA. Other users can send or request money from you using your username e.g. @john_doe.</p></div>
+            <div className="help-item"><h4>How do I reset my password?</h4><p>Click "Forgot password?" on the login page and follow the instructions.</p></div>
           </div>
         </div>
       )}
@@ -824,11 +911,10 @@ export default function App() {
           <div className="back-arrow" onClick={goBack}><FontAwesomeIcon icon={faArrowLeft} /> Back</div>
           <h2>Contact Us</h2>
           <div className="contact-card">
-            <p>We're here to help! Reach out to us through any of the channels below.</p>
+            <p>We're here to help! Reach out to us and we'll respond within 24 hours.</p>
             <div className="contact-item"><strong>Email:</strong> support@nafaka.co.ke</div>
-            <div className="contact-item"><strong>Phone:</strong> +254 700 000 000</div>
-            <div className="contact-item"><strong>Hours:</strong> Monday – Friday, 8AM – 6PM EAT</div>
-            <div className="contact-item"><strong>Address:</strong> Nairobi, Kenya</div>
+            <div className="contact-item"><strong>Support Hours:</strong> Monday – Friday, 8AM – 6PM EAT</div>
+            <div className="contact-item"><strong>Location:</strong> Nairobi, Kenya</div>
           </div>
         </div>
       )}
@@ -843,12 +929,16 @@ export default function App() {
             <h4>2. Use of Service</h4>
             <p>NAFAKA Wallet is a digital wallet platform that allows users to deposit, withdraw, send and receive money. You must be 18 years or older to use this service.</p>
             <h4>3. Account Security</h4>
-            <p>You are responsible for maintaining the security of your account. Do not share your password or PIN with anyone.</p>
-            <h4>4. Transactions</h4>
-            <p>All transactions are final once confirmed. NAFAKA is not responsible for funds sent to incorrect accounts.</p>
-            <h4>5. Fees</h4>
+            <p>You are responsible for maintaining the security of your account. Do not share your password with anyone.</p>
+            <h4>4. Usernames</h4>
+            <p>Your NAFAKA username is unique and permanent. Choose it carefully as it is used by other users to send and request money from you.</p>
+            <h4>5. Transactions</h4>
+            <p>All transactions are final once confirmed. NAFAKA is not responsible for funds sent to incorrect usernames.</p>
+            <h4>6. Spending Limits</h4>
+            <p>Users may set daily and monthly spending limits to control their usage. NAFAKA will enforce these limits and notify users when approaching them.</p>
+            <h4>7. Fees</h4>
             <p>NAFAKA reserves the right to introduce transaction fees with prior notice to users.</p>
-            <h4>6. Termination</h4>
+            <h4>8. Termination</h4>
             <p>NAFAKA reserves the right to suspend or terminate accounts that violate these terms.</p>
             <p style={{ opacity: 0.5, marginTop: "20px", fontSize: "12px" }}>Last updated: January 2026</p>
           </div>
@@ -861,15 +951,15 @@ export default function App() {
           <h2>Privacy Policy</h2>
           <div className="legal-content">
             <h4>1. Information We Collect</h4>
-            <p>We collect your name, email address, phone number and transaction data when you use NAFAKA Wallet.</p>
+            <p>We collect your name, email address, phone number, username and transaction data when you use NAFAKA Wallet.</p>
             <h4>2. How We Use Your Information</h4>
             <p>Your information is used to operate your wallet, process transactions, send notifications and improve our service.</p>
             <h4>3. Data Security</h4>
             <p>We use industry-standard encryption to protect your personal data and financial information.</p>
             <h4>4. Data Sharing</h4>
-            <p>We do not sell your personal data to third parties. We may share data with payment processors (M-Pesa) to process transactions.</p>
+            <p>We do not sell your personal data to third parties. We may share data with payment processors (M-Pesa) solely to process transactions.</p>
             <h4>5. Your Rights</h4>
-            <p>You have the right to access, correct or delete your personal data. Contact us at privacy@nafaka.co.ke.</p>
+            <p>You have the right to access, correct or delete your personal data. Contact us at support@nafaka.co.ke.</p>
             <h4>6. Cookies</h4>
             <p>NAFAKA uses local storage to maintain your session. No third-party cookies are used.</p>
             <p style={{ opacity: 0.5, marginTop: "20px", fontSize: "12px" }}>Last updated: January 2026</p>

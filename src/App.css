@@ -1038,3 +1038,75 @@ body {
   line-height: 1.6;
   margin: 0;
 }
+
+.wallet-balance-card {
+  background: linear-gradient(135deg, #1d4ed8, #9333ea);
+  padding: 25px;
+  border-radius: 12px;
+  margin-bottom: 25px;
+}
+
+.wallet-actions-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+
+.wallet-action-card {
+  background: #1e293b;
+  padding: 20px;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.wallet-action-card h3 {
+  margin: 0;
+  font-size: 15px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #94a3b8;
+}
+
+.wallet-action-btn {
+  padding: 12px;
+  border: none;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  color: white;
+}
+
+.deposit-btn {
+  background: linear-gradient(135deg, #1d4ed8, #3b82f6);
+}
+
+.withdraw-btn {
+  background: linear-gradient(135deg, #7e22ce, #9333ea);
+}
+
+.wallet-processing {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 15px 0;
+  text-align: center;
+}
+
+/* ── NOTIFICATION TYPES ──────────────────────────────────── */
+.notification-warning {
+  border-left: 3px solid #f59e0b !important;
+}
+
+.notification-transaction {
+  cursor: pointer;
+}
+
+.notification-request {
+  border-left: 3px solid #8b5cf6 !important;
+  cursor: pointer;
+}
