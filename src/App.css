@@ -905,3 +905,136 @@ body {
 .setting-item.setting-form button:hover {
   background: #2563eb;
 }
+
+.modal-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+
+.modal-card {
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 16px;
+  padding: 30px;
+  width: 100%;
+  max-width: 400px;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 5px;
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.modal-btn {
+  background: linear-gradient(135deg, #1d4ed8, #9333ea);
+  color: white;
+  border: none;
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 15px;
+  cursor: pointer;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.modal-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.modal-processing {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 15px;
+  padding: 20px 0;
+  text-align: center;
+}
+
+/* ── FOOTER PAGES ────────────────────────────────────────── */
+.footer-page {
+  padding: 25px;
+}
+
+.help-list {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  margin-top: 20px;
+}
+
+.help-item {
+  background: #1e293b;
+  padding: 20px;
+  border-radius: 10px;
+}
+
+.help-item h4 {
+  margin: 0 0 8px 0;
+  color: #3b82f6;
+}
+
+.help-item p {
+  margin: 0;
+  font-size: 14px;
+  opacity: 0.8;
+  line-height: 1.6;
+}
+
+.contact-card {
+  background: #1e293b;
+  padding: 25px;
+  border-radius: 12px;
+  margin-top: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.contact-card p {
+  opacity: 0.7;
+  margin: 0 0 10px 0;
+}
+
+.contact-item {
+  font-size: 14px;
+  padding: 10px 0;
+  border-bottom: 1px solid #334155;
+}
+
+.legal-content {
+  margin-top: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.legal-content h4 {
+  color: #3b82f6;
+  margin: 0 0 5px 0;
+}
+
+.legal-content p {
+  font-size: 14px;
+  opacity: 0.8;
+  line-height: 1.6;
+  margin: 0;
+}
