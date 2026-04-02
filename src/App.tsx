@@ -3,7 +3,8 @@ import {
   faHome, faWallet, faExchangeAlt, faChartLine,
   faGift, faCog, faBell, faArrowLeft, faSpinner,
   faArrowUp, faArrowDown, faMobileAlt, faMoneyBillWave,
-  faTimes, faPaperPlane, faHandHoldingUsd,
+  faTimes, faPaperPlane, faHandHoldingUsd, faShieldAlt,
+  faUsers, faFlag, faPiggyBank,
 } from "@fortawesome/free-solid-svg-icons";
 import { useState, useEffect, useCallback } from "react";
 import {
@@ -37,14 +38,20 @@ const apiFetch = async (path: string, options?: RequestInit) => {
   return data;
 };
 
-interface User { id: string; fullName: string; email: string; phone: string; username: string }
+interface User { id: string; fullName: string; email: string; phone: string; username: string; role: string }
 interface Transaction {
-  id: string; type: string; amount: number; description: string;
-  status: string; mpesaRef?: string; counterparty?: string; createdAt: string;
+  id: string; type: string; amount: number; fee: number; description: string;
+  status: string; mpesaRef?: string; counterparty?: string; createdAt: string; flagged?: boolean;
+  user?: { fullName: string; username: string; email?: string };
 }
 interface Notification { id: string; message: string; isRead: boolean; createdAt: string; type?: string }
 interface Reward { id: string; redeemed: boolean; reward: { name: string; description: string; points: number; type: string } }
 interface Limits { dailyLimit: number | null; monthlyLimit: number | null }
+interface AdminStats {
+  totalUsers: number; totalTransactions: number; totalWalletBalance: number;
+  totalVolume: number; totalFees: number; flaggedCount: number;
+  recentTransactions: Transaction[];
+}
 
 // ─── Modal ───────────────────────────────────────────────────
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
@@ -132,6 +139,225 @@ function AuthScreen({ onAuth }: { onAuth: (token: string, user: User) => void })
   );
 }
 
+// ─── Admin Panel ──────────────────────────────────────────────
+function AdminPanel({ onLogout }: { onLogout: () => void }) {
+  const [activeTab, setActiveTab] = useState<"overview" | "users" | "transactions" | "flagged">("overview");
+  const [stats, setStats] = useState<AdminStats | null>(null);
+  const [users, setUsers] = useState<{ id: string; fullName: string; email: string; username: string; balance: number; phone: string; createdAt: string }[]>([]);
+  const [allTransactions, setAllTransactions] = useState<Transaction[]>([]);
+  const [flagged, setFlagged] = useState<{ id: string; type: string; amount: number; status: string; createdAt: string; user: { fullName: string; username: string }; reason: string }[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const fetchStats = useCallback(async () => {
+    try { const d = await apiFetch("/admin/stats"); setStats(d); } catch {}
+  }, []);
+
+  const fetchUsers = useCallback(async () => {
+    try { const d = await apiFetch("/admin/users"); setUsers(d.users); } catch {}
+  }, []);
+
+  const fetchAllTransactions = useCallback(async () => {
+    try { const d = await apiFetch("/admin/transactions"); setAllTransactions(d.transactions); } catch {}
+  }, []);
+
+  const fetchFlagged = useCallback(async () => {
+    try { const d = await apiFetch("/admin/flagged"); setFlagged(d.flagged); } catch {}
+  }, []);
+
+  useEffect(() => { fetchStats(); }, [fetchStats]);
+
+  useEffect(() => {
+    setLoading(true);
+    if (activeTab === "users") fetchUsers().finally(() => setLoading(false));
+    else if (activeTab === "transactions") fetchAllTransactions().finally(() => setLoading(false));
+    else if (activeTab === "flagged") fetchFlagged().finally(() => setLoading(false));
+    else setLoading(false);
+  }, [activeTab, fetchUsers, fetchAllTransactions, fetchFlagged]);
+
+  const isCredit = (type: string) => ["DEPOSIT", "RECEIVE", "VAULT_WITHDRAWAL"].includes(type);
+
+  return (
+    <div className="admin-panel">
+      {/* Admin Header */}
+      <header className="admin-header">
+        <div className="admin-logo">
+          <FontAwesomeIcon icon={faShieldAlt} style={{ color: "#ef4444" }} />
+          <span>NAFAKA Admin</span>
+        </div>
+        <button className="logout" onClick={onLogout}>Logout</button>
+      </header>
+
+      {/* Admin Nav */}
+      <div className="admin-nav">
+        {[
+          { key: "overview", icon: faChartLine, label: "Overview" },
+          { key: "users", icon: faUsers, label: "Users" },
+          { key: "transactions", icon: faExchangeAlt, label: "Transactions" },
+          { key: "flagged", icon: faFlag, label: `Flagged ${stats?.flaggedCount ? `(${stats.flaggedCount})` : ""}` },
+        ].map(tab => (
+          <div key={tab.key}
+            className={`admin-nav-item ${activeTab === tab.key ? "active" : ""}`}
+            onClick={() => setActiveTab(tab.key as typeof activeTab)}>
+            <FontAwesomeIcon icon={tab.icon} />
+            <span>{tab.label}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Admin Content */}
+      <main className="admin-main">
+        {activeTab === "overview" && stats && (
+          <div>
+            <h2>System Overview</h2>
+            <div className="admin-stats-grid">
+              <div className="admin-stat-card">
+                <span>Total Users</span>
+                <strong>{stats.totalUsers.toLocaleString()}</strong>
+              </div>
+              <div className="admin-stat-card">
+                <span>Total Transactions</span>
+                <strong>{stats.totalTransactions.toLocaleString()}</strong>
+              </div>
+              <div className="admin-stat-card">
+                <span>Total Wallet Balance</span>
+                <strong className="pos">KES {stats.totalWalletBalance.toLocaleString()}</strong>
+              </div>
+              <div className="admin-stat-card">
+                <span>Total Volume</span>
+                <strong>KES {stats.totalVolume.toLocaleString()}</strong>
+              </div>
+              <div className="admin-stat-card">
+                <span>Total Fees Earned</span>
+                <strong className="pos">KES {stats.totalFees.toLocaleString()}</strong>
+              </div>
+              <div className="admin-stat-card" style={{ borderLeft: "3px solid #ef4444" }}>
+                <span>Flagged Transactions</span>
+                <strong className="neg">{stats.flaggedCount}</strong>
+              </div>
+            </div>
+
+            <h3 style={{ marginTop: "30px" }}>Recent Transactions</h3>
+            <div className="admin-table">
+              <div className="admin-table-header">
+                <span>User</span>
+                <span>Type</span>
+                <span>Amount</span>
+                <span>Fee</span>
+                <span>Status</span>
+                <span>Date</span>
+              </div>
+              {stats.recentTransactions.map(tx => (
+                <div key={tx.id} className={`admin-table-row ${tx.flagged ? "flagged-row" : ""}`}>
+                  <span>@{tx.user?.username}</span>
+                  <span>{tx.type}</span>
+                  <span className={isCredit(tx.type) ? "pos" : "neg"}>
+                    {isCredit(tx.type) ? "+" : "-"}KES {tx.amount.toLocaleString()}
+                  </span>
+                  <span>KES {tx.fee.toLocaleString()}</span>
+                  <span className={tx.status === "SUCCESS" ? "pos" : "neg"}>{tx.status}</span>
+                  <span>{new Date(tx.createdAt).toLocaleDateString("en-KE")}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {activeTab === "users" && (
+          <div>
+            <h2>All Users ({users.length})</h2>
+            {loading ? <p>Loading...</p> : (
+              <div className="admin-table">
+                <div className="admin-table-header">
+                  <span>Name</span>
+                  <span>Username</span>
+                  <span>Email</span>
+                  <span>Phone</span>
+                  <span>Balance</span>
+                  <span>Joined</span>
+                </div>
+                {users.map(u => (
+                  <div key={u.id} className="admin-table-row">
+                    <span>{u.fullName}</span>
+                    <span>@{u.username}</span>
+                    <span>{u.email}</span>
+                    <span>{u.phone}</span>
+                    <span className="pos">KES {u.balance.toLocaleString()}</span>
+                    <span>{new Date(u.createdAt).toLocaleDateString("en-KE")}</span>
+                  </div>
+                ))}
+                {users.length === 0 && <p style={{ padding: "20px", opacity: 0.5 }}>No users yet</p>}
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === "transactions" && (
+          <div>
+            <h2>All Transactions ({allTransactions.length})</h2>
+            {loading ? <p>Loading...</p> : (
+              <div className="admin-table">
+                <div className="admin-table-header">
+                  <span>User</span>
+                  <span>Type</span>
+                  <span>Amount</span>
+                  <span>Fee</span>
+                  <span>Description</span>
+                  <span>Status</span>
+                  <span>Date</span>
+                </div>
+                {allTransactions.map(tx => (
+                  <div key={tx.id} className={`admin-table-row ${tx.flagged ? "flagged-row" : ""}`}>
+                    <span>@{tx.user?.username}</span>
+                    <span>{tx.type}</span>
+                    <span className={isCredit(tx.type) ? "pos" : "neg"}>
+                      {isCredit(tx.type) ? "+" : "-"}KES {tx.amount.toLocaleString()}
+                    </span>
+                    <span>KES {tx.fee.toLocaleString()}</span>
+                    <span>{tx.description}</span>
+                    <span className={tx.status === "SUCCESS" ? "pos" : "neg"}>{tx.status}</span>
+                    <span>{new Date(tx.createdAt).toLocaleDateString("en-KE")}</span>
+                  </div>
+                ))}
+                {allTransactions.length === 0 && <p style={{ padding: "20px", opacity: 0.5 }}>No transactions yet</p>}
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === "flagged" && (
+          <div>
+            <h2>🚨 Flagged Transactions ({flagged.length})</h2>
+            <p style={{ opacity: 0.6, fontSize: "14px", marginBottom: "20px" }}>
+              Transactions above KES 50,000 are automatically flagged for review.
+            </p>
+            {loading ? <p>Loading...</p> : (
+              <div className="admin-table">
+                <div className="admin-table-header">
+                  <span>User</span>
+                  <span>Type</span>
+                  <span>Amount</span>
+                  <span>Reason</span>
+                  <span>Date</span>
+                </div>
+                {flagged.map(tx => (
+                  <div key={tx.id} className="admin-table-row flagged-row">
+                    <span>@{tx.user?.username} ({tx.user?.fullName})</span>
+                    <span>{tx.type}</span>
+                    <span className="neg">KES {tx.amount.toLocaleString()}</span>
+                    <span style={{ color: "#f59e0b" }}>{tx.reason}</span>
+                    <span>{new Date(tx.createdAt).toLocaleDateString("en-KE")}</span>
+                  </div>
+                ))}
+                {flagged.length === 0 && <p style={{ padding: "20px", opacity: 0.5 }}>No flagged transactions</p>}
+              </div>
+            )}
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
+
 // ─── Main App ─────────────────────────────────────────────────
 export default function App() {
   const [token, setToken] = useState<string | null>(localStorage.getItem("nafaka_token"));
@@ -145,6 +371,9 @@ export default function App() {
   const [collapsed, setCollapsed] = useState(true);
 
   const [balance, setBalance] = useState<number | null>(null);
+  const [vaultBalance, setVaultBalance] = useState<number>(0);
+  const [vaultGoal, setVaultGoal] = useState<number | null>(null);
+  const [vaultGoalName, setVaultGoalName] = useState<string>("");
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -163,6 +392,7 @@ export default function App() {
   const [requestForm, setRequestForm] = useState({ username: "", amount: "", note: "" });
   const [profileForm, setProfileForm] = useState({ fullName: "", phone: "", username: "" });
   const [securityForm, setSecurityForm] = useState({ currentPassword: "", newPassword: "" });
+  const [vaultForm, setVaultForm] = useState({ amount: "", goalAmount: "", goalName: "" });
 
   const [loading, setLoading] = useState<Record<string, boolean>>({});
   const [msg, setMsg] = useState<Record<string, string>>({});
@@ -176,6 +406,15 @@ export default function App() {
 
   const fetchBalance = useCallback(async () => {
     try { const d = await apiFetch("/wallet"); setBalance(d.balance); } catch {}
+  }, []);
+
+  const fetchVault = useCallback(async () => {
+    try {
+      const d = await apiFetch("/vault");
+      setVaultBalance(d.balance);
+      setVaultGoal(d.goal);
+      setVaultGoalName(d.goalName || "");
+    } catch {}
   }, []);
 
   const fetchTransactions = useCallback(async () => {
@@ -218,20 +457,21 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!token) return;
-    fetchBalance(); fetchTransactions(); fetchNotifications();
-  }, [token, fetchBalance, fetchTransactions, fetchNotifications]);
+    if (!token || user?.role === "ADMIN") return;
+    fetchBalance(); fetchTransactions(); fetchNotifications(); fetchVault();
+  }, [token, user, fetchBalance, fetchTransactions, fetchNotifications, fetchVault]);
 
   useEffect(() => {
     if (active === "Analytics") fetchAnalytics();
     if (active === "Rewards") fetchRewards();
     if (active === "Settings") { fetchProfile(); fetchLimits(); }
+    if (active === "Vault") fetchVault();
     if (active === "Notifications") {
       fetchNotifications();
       setUnreadCount(0);
       apiFetch("/notifications/mark-all-read", { method: "PATCH" }).catch(() => {});
     }
-  }, [active, fetchAnalytics, fetchRewards, fetchProfile, fetchLimits, fetchNotifications]);
+  }, [active, fetchAnalytics, fetchRewards, fetchProfile, fetchLimits, fetchVault, fetchNotifications]);
 
   const handleAuth = (t: string, u: User) => { setToken(t); setUser(u); };
 
@@ -245,14 +485,10 @@ export default function App() {
   // ─── Deposit ─────────────────────────────────────────────
   const handleDeposit = async () => {
     if (!depositAmount) return;
-    setDepositStep("processing");
-    setM("deposit", "");
+    setDepositStep("processing"); setM("deposit", "");
     try {
       await new Promise(r => setTimeout(r, 8000));
-      await apiFetch("/mpesa/deposit", {
-        method: "POST",
-        body: JSON.stringify({ amount: Number(depositAmount) }),
-      });
+      await apiFetch("/mpesa/deposit", { method: "POST", body: JSON.stringify({ amount: Number(depositAmount) }) });
       setDepositStep("done");
       setM("deposit", `KES ${Number(depositAmount).toLocaleString()} deposited successfully!`);
       setDepositAmount("");
@@ -267,19 +503,15 @@ export default function App() {
   // ─── Withdraw ────────────────────────────────────────────
   const handleWithdraw = async () => {
     if (!withdrawAmount) return;
-    setWithdrawStep("processing");
-    setM("withdraw", "");
+    setWithdrawStep("processing"); setM("withdraw", "");
     try {
       await new Promise(r => setTimeout(r, 5000));
-      const d = await apiFetch("/mpesa/withdraw", {
-        method: "POST",
-        body: JSON.stringify({ amount: Number(withdrawAmount) }),
-      });
+      const d = await apiFetch("/mpesa/withdraw", { method: "POST", body: JSON.stringify({ amount: Number(withdrawAmount) }) });
       setWithdrawStep("done");
       setM("withdraw", d.message);
       setWithdrawAmount("");
       await fetchBalance(); await fetchTransactions(); await fetchNotifications();
-      setTimeout(() => { setActive("Dashboard"); setWithdrawStep("idle"); setM("withdraw", ""); }, 2000);
+      setTimeout(() => { setActive("Dashboard"); setWithdrawStep("idle"); setM("withdraw", ""); }, 3000);
     } catch (e: unknown) {
       setWithdrawStep("idle");
       setM("withdraw", e instanceof Error ? e.message : "Withdrawal failed");
@@ -298,7 +530,7 @@ export default function App() {
       setM("send", d.message);
       setSendForm({ username: "", amount: "", note: "" });
       await fetchBalance(); await fetchTransactions(); await fetchNotifications();
-      setTimeout(() => { setModal(null); setM("send", ""); }, 2000);
+      setTimeout(() => { setModal(null); setM("send", ""); }, 3000);
     } catch (e: unknown) {
       setM("send", e instanceof Error ? e.message : "Send failed");
     } finally { setL("send", false); }
@@ -315,13 +547,54 @@ export default function App() {
       });
       setM("request", d.message);
       setRequestForm({ username: "", amount: "", note: "" });
-      setTimeout(() => { setModal(null); setM("request", ""); }, 2000);
+      setTimeout(() => { setModal(null); setM("request", ""); }, 3000);
     } catch (e: unknown) {
       setM("request", e instanceof Error ? e.message : "Request failed");
     } finally { setL("request", false); }
   };
 
-  // ─── Redeem Reward ───────────────────────────────────────
+  // ─── Vault ───────────────────────────────────────────────
+  const handleVaultDeposit = async () => {
+    if (!vaultForm.amount) return;
+    setL("vault-deposit", true); setM("vault", "");
+    try {
+      const d = await apiFetch("/vault/deposit", { method: "POST", body: JSON.stringify({ amount: Number(vaultForm.amount) }) });
+      setM("vault", d.message);
+      setVaultForm({ ...vaultForm, amount: "" });
+      await fetchBalance(); await fetchVault(); await fetchTransactions();
+    } catch (e: unknown) {
+      setM("vault", e instanceof Error ? e.message : "Vault deposit failed");
+    } finally { setL("vault-deposit", false); }
+  };
+
+  const handleVaultWithdraw = async () => {
+    if (!vaultForm.amount) return;
+    setL("vault-withdraw", true); setM("vault", "");
+    try {
+      const d = await apiFetch("/vault/withdraw", { method: "POST", body: JSON.stringify({ amount: Number(vaultForm.amount) }) });
+      setM("vault", d.message);
+      setVaultForm({ ...vaultForm, amount: "" });
+      await fetchBalance(); await fetchVault(); await fetchTransactions();
+    } catch (e: unknown) {
+      setM("vault", e instanceof Error ? e.message : "Vault withdrawal failed");
+    } finally { setL("vault-withdraw", false); }
+  };
+
+  const handleVaultGoal = async () => {
+    setL("vault-goal", true);
+    try {
+      await apiFetch("/vault/goal", {
+        method: "PATCH",
+        body: JSON.stringify({ goal: Number(vaultForm.goalAmount), goalName: vaultForm.goalName }),
+      });
+      setM("vault", "Savings goal updated!");
+      await fetchVault();
+    } catch (e: unknown) {
+      setM("vault", e instanceof Error ? e.message : "Failed to update goal");
+    } finally { setL("vault-goal", false); }
+  };
+
+  // ─── Rewards ─────────────────────────────────────────────
   const handleRedeemReward = async (userRewardId: string) => {
     setL(`reward-${userRewardId}`, true);
     try {
@@ -375,28 +648,45 @@ export default function App() {
   const handlePrintReceipt = (tx: Transaction) => {
     const win = window.open("", "_blank");
     if (!win) return;
+    const isCredit = ["DEPOSIT", "RECEIVE", "VAULT_WITHDRAWAL"].includes(tx.type);
     win.document.write(`
       <html><head><title>NAFAKA Receipt</title>
       <style>
-        body{font-family:Arial;padding:30px;max-width:400px;margin:auto;}
-        h1{color:#1d4ed8;} table{width:100%;border-collapse:collapse;}
-        td{padding:8px;border-bottom:1px solid #eee;}
-        .amount{font-size:24px;font-weight:bold;color:${["DEPOSIT","RECEIVE"].includes(tx.type) ? "#22c55e" : "#ef4444"};}
+        body{font-family:Arial;padding:30px;max-width:450px;margin:auto;background:#fff;}
+        .header{text-align:center;border-bottom:2px solid #1d4ed8;padding-bottom:15px;margin-bottom:20px;}
+        h1{color:#1d4ed8;margin:0;font-size:24px;} h3{color:#555;margin:5px 0;}
+        table{width:100%;border-collapse:collapse;margin-top:15px;}
+        td{padding:10px;border-bottom:1px solid #eee;font-size:14px;}
+        td:first-child{color:#888;width:40%;}
+        .amount{font-size:28px;font-weight:bold;text-align:center;padding:15px;
+          color:${isCredit ? "#22c55e" : "#ef4444"};}
+        .status{background:${tx.status === "SUCCESS" ? "#dcfce7" : "#fef2f2"};
+          color:${tx.status === "SUCCESS" ? "#166534" : "#991b1b"};
+          padding:4px 10px;border-radius:20px;font-size:12px;}
+        .footer{text-align:center;margin-top:20px;font-size:11px;color:#aaa;}
       </style></head>
       <body>
-        <h1>NAFAKA Wallet</h1>
-        <h3>Transaction Receipt</h3>
+        <div class="header">
+          <h1>NAFAKA</h1>
+          <h3>Digital Wallet — Transaction Receipt</h3>
+        </div>
+        <div class="amount">${isCredit ? "+" : "-"}KES ${tx.amount.toLocaleString()}</div>
         <table>
-          <tr><td><b>Transaction ID</b></td><td>${tx.id}</td></tr>
-          <tr><td><b>Type</b></td><td>${tx.type}</td></tr>
-          <tr><td><b>Amount</b></td><td class="amount">KES ${tx.amount.toLocaleString()}</td></tr>
-          <tr><td><b>Description</b></td><td>${tx.description}</td></tr>
-          <tr><td><b>Status</b></td><td>${tx.status}</td></tr>
-          <tr><td><b>Date</b></td><td>${new Date(tx.createdAt).toLocaleString("en-KE")}</td></tr>
-          <tr><td><b>Account</b></td><td>${user?.fullName || ""}</td></tr>
-          <tr><td><b>Username</b></td><td>@${user?.username || ""}</td></tr>
+          <tr><td>Transaction ID</td><td>${tx.id.toUpperCase()}</td></tr>
+          <tr><td>Type</td><td>${tx.type.replace("_", " ")}</td></tr>
+          <tr><td>Description</td><td>${tx.description}</td></tr>
+          <tr><td>Fee</td><td>KES ${(tx.fee || 0).toLocaleString()}</td></tr>
+          <tr><td>Total</td><td>KES ${(tx.amount + (tx.fee || 0)).toLocaleString()}</td></tr>
+          <tr><td>Status</td><td><span class="status">${tx.status}</span></td></tr>
+          <tr><td>Counterparty</td><td>${tx.counterparty || "N/A"}</td></tr>
+          <tr><td>Date & Time</td><td>${new Date(tx.createdAt).toLocaleString("en-KE")}</td></tr>
+          <tr><td>Account</td><td>${user?.fullName || ""}</td></tr>
+          <tr><td>Username</td><td>@${user?.username || ""}</td></tr>
         </table>
-        <p style="text-align:center;margin-top:20px;opacity:0.5;font-size:12px;">NAFAKA Digital Wallet © 2026</p>
+        <div class="footer">
+          <p>NAFAKA Digital Wallet © 2026 | support@nafaka.co.ke</p>
+          <p>This is an official NAFAKA transaction receipt.</p>
+        </div>
         <script>window.print()</script>
       </body></html>
     `);
@@ -404,9 +694,26 @@ export default function App() {
   };
 
   if (!token) return <AuthScreen onAuth={handleAuth} />;
+  if (user?.role === "ADMIN") return <AdminPanel onLogout={handleLogout} />;
 
   const goBack = () => setActive("Dashboard");
-  const isCredit = (type: string) => ["DEPOSIT", "RECEIVE"].includes(type);
+  const isCredit = (type: string) => ["DEPOSIT", "RECEIVE", "VAULT_WITHDRAWAL"].includes(type);
+
+  const getTypeLabel = (type: string) => {
+    const labels: Record<string, string> = {
+      DEPOSIT: "Deposit", WITHDRAWAL: "Withdrawal", SEND: "Sent",
+      RECEIVE: "Received", VAULT_DEPOSIT: "Vault Save", VAULT_WITHDRAWAL: "Vault Withdraw",
+    };
+    return labels[type] || type;
+  };
+
+  const getTypeIcon = (type: string) => {
+    const icons: Record<string, string> = {
+      DEPOSIT: "📲", WITHDRAWAL: "📤", SEND: "💸",
+      RECEIVE: "💰", VAULT_DEPOSIT: "🏦", VAULT_WITHDRAWAL: "🏦",
+    };
+    return icons[type] || "💳";
+  };
 
   return (
     <div className="app" onClick={() => menuOpen && setMenuOpen(false)}>
@@ -415,15 +722,20 @@ export default function App() {
       {modal === "send" && (
         <Modal title="Send Money" onClose={() => { setModal(null); setM("send", ""); setSendForm({ username: "", amount: "", note: "" }); }}>
           {!msg.send ? (<>
-            <div style={{ fontSize: "13px", opacity: 0.6, marginBottom: "5px" }}>
-              Enter the recipient's NAFAKA username e.g. @john_doe
-            </div>
+            <p style={{ fontSize: "13px", opacity: 0.6, margin: "0 0 10px 0" }}>
+              Send money instantly to any NAFAKA user using their username.
+            </p>
             <input className="wallet-input" placeholder="@username"
               value={sendForm.username} onChange={e => setSendForm({ ...sendForm, username: e.target.value })} />
             <input className="wallet-input" type="number" placeholder="Amount (KES)"
               value={sendForm.amount} onChange={e => setSendForm({ ...sendForm, amount: e.target.value })} />
             <input className="wallet-input" placeholder="Note (optional)"
               value={sendForm.note} onChange={e => setSendForm({ ...sendForm, note: e.target.value })} />
+            <div className="fee-notice">
+              {sendForm.amount && Number(sendForm.amount) > 0 && (
+                <span>Fee: KES {Math.max(Math.ceil(Number(sendForm.amount) * 0.005), 2)} · Total: KES {(Number(sendForm.amount) + Math.max(Math.ceil(Number(sendForm.amount) * 0.005), 2)).toLocaleString()}</span>
+              )}
+            </div>
             <p style={{ fontSize: "13px", opacity: 0.6 }}>Available: KES {balance?.toLocaleString() || 0}</p>
             {msg.send && <p className="form-error">{msg.send}</p>}
             <button className="modal-btn" onClick={handleSend}
@@ -441,9 +753,9 @@ export default function App() {
       {modal === "request" && (
         <Modal title="Request Money" onClose={() => { setModal(null); setM("request", ""); setRequestForm({ username: "", amount: "", note: "" }); }}>
           {!msg.request ? (<>
-            <div style={{ fontSize: "13px", opacity: 0.6, marginBottom: "5px" }}>
-              Enter the NAFAKA username of who you want to request from
-            </div>
+            <p style={{ fontSize: "13px", opacity: 0.6, margin: "0 0 10px 0" }}>
+              Send a money request to another NAFAKA user. They will receive a notification.
+            </p>
             <input className="wallet-input" placeholder="@username"
               value={requestForm.username} onChange={e => setRequestForm({ ...requestForm, username: e.target.value })} />
             <input className="wallet-input" type="number" placeholder="Amount (KES)"
@@ -494,6 +806,7 @@ export default function App() {
         {[
           { name: "Dashboard", icon: faHome },
           { name: "Wallet", icon: faWallet },
+          { name: "Vault", icon: faPiggyBank },
           { name: "Transactions", icon: faExchangeAlt },
           { name: "Analytics", icon: faChartLine },
           { name: "Rewards", icon: faGift },
@@ -513,10 +826,18 @@ export default function App() {
         {active === "Dashboard" && (
           <div>
             <section className="balance-card">
-              <div>
-                <p className="label">Available Balance</p>
-                <h2>{balance !== null ? `KES ${balance.toLocaleString()}` : "Loading..."}</h2>
-                <span className="sub">Hi, {user?.fullName?.split(" ")[0]} 👋 · @{user?.username}</span>
+              <div className="balance-card-content">
+                <div>
+                  <p className="label">Available Balance</p>
+                  <h2>{balance !== null ? `KES ${Number(balance).toLocaleString()}` : "Loading..."}</h2>
+                  <span className="sub">Hi, {user?.fullName?.split(" ")[0]} 👋 · @{user?.username}</span>
+                </div>
+                {vaultBalance > 0 && (
+                  <div className="vault-mini">
+                    <FontAwesomeIcon icon={faPiggyBank} />
+                    <span>Vault: KES {vaultBalance.toLocaleString()}</span>
+                  </div>
+                )}
               </div>
             </section>
 
@@ -537,44 +858,67 @@ export default function App() {
 
             <section className="grid">
               <div className="card">
-                <h3>Recent Transactions</h3>
+                <div className="card-header-row">
+                  <h3>Recent Transactions</h3>
+                  <span className="view-all" onClick={() => setActive("Transactions")}>View all →</span>
+                </div>
                 {transactions.slice(0, 5).map(tx => (
-                  <div key={tx.id} className="tx" style={{ cursor: "pointer" }} onClick={() => handlePrintReceipt(tx)}>
-                    <div>
-                      <p>{tx.description}</p>
-                      <span>{new Date(tx.createdAt).toLocaleDateString("en-KE")} | {tx.status}</span>
+                  <div key={tx.id} className="tx-item">
+                    <div className="tx-icon">{getTypeIcon(tx.type)}</div>
+                    <div className="tx-details">
+                      <p>{getTypeLabel(tx.type)}</p>
+                      <span>{tx.counterparty ? `${tx.counterparty} · ` : ""}{new Date(tx.createdAt).toLocaleDateString("en-KE")}</span>
                     </div>
-                    <strong className={isCredit(tx.type) ? "pos" : "neg"}>
-                      {isCredit(tx.type) ? "+" : "-"}KES {tx.amount.toLocaleString()}
-                    </strong>
+                    <div className="tx-amount">
+                      <strong className={isCredit(tx.type) ? "pos" : "neg"}>
+                        {isCredit(tx.type) ? "+" : "-"}KES {tx.amount.toLocaleString()}
+                      </strong>
+                      <span className="tx-status completed">Completed</span>
+                    </div>
                   </div>
                 ))}
-                {transactions.length === 0 && <p style={{ opacity: 0.5 }}>No transactions yet</p>}
-                {transactions.length > 5 && (
-                  <p style={{ color: "#3b82f6", cursor: "pointer", marginTop: "10px", fontSize: "13px" }}
-                    onClick={() => setActive("Transactions")}>
-                    View all transactions →
-                  </p>
+                {transactions.length === 0 && (
+                  <div className="empty-state">
+                    <p>No transactions yet</p>
+                    <span>Make your first deposit to get started</span>
+                  </div>
                 )}
               </div>
 
-              <div className="card" style={{ cursor: "pointer" }} onClick={() => setActive("Analytics")}>
-                <h3>Spending Overview</h3>
-                {analytics?.dailySpending && analytics.dailySpending.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={150}>
+              <div className="card spending-card" onClick={() => setActive("Analytics")}>
+                <div className="card-header-row">
+                  <h3>Spending Overview</h3>
+                  <span className="view-all">Analytics →</span>
+                </div>
+                {analytics?.dailySpending && analytics.dailySpending.length > 0 ? (<>
+                  <div className="spending-stats">
+                    <div>
+                      <span>This Month</span>
+                      <strong className="neg">KES {Number(analytics.summary.monthlySpend).toLocaleString()}</strong>
+                    </div>
+                    <div>
+                      <span>Total In</span>
+                      <strong className="pos">KES {Number(analytics.summary.totalDeposited).toLocaleString()}</strong>
+                    </div>
+                  </div>
+                  <ResponsiveContainer width="100%" height={120}>
                     <AreaChart data={analytics.dailySpending}>
                       <defs>
                         <linearGradient id="colorSpend" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
+                          <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.4} />
                           <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
                         </linearGradient>
                       </defs>
-                      <Area type="monotone" dataKey="amount" stroke="#3b82f6" fill="url(#colorSpend)" strokeWidth={2} />
-                      <Tooltip contentStyle={{ background: "#020617", border: "none", fontSize: "12px" }} />
+                      <Area type="monotone" dataKey="amount" stroke="#3b82f6" fill="url(#colorSpend)" strokeWidth={2} dot={false} />
+                      <Tooltip contentStyle={{ background: "#020617", border: "none", fontSize: "11px" }}
+                        formatter={(v: number) => [`KES ${v.toLocaleString()}`, "Spent"]} />
                     </AreaChart>
                   </ResponsiveContainer>
-                ) : (
-                  <div className="chart-placeholder">Click to view Analytics →</div>
+                </>) : (
+                  <div className="chart-placeholder" style={{ height: "150px" }}>
+                    <p style={{ margin: 0 }}>📊</p>
+                    <p style={{ margin: "5px 0 0 0", fontSize: "13px" }}>Make transactions to see your spending chart</p>
+                  </div>
                 )}
               </div>
             </section>
@@ -587,14 +931,13 @@ export default function App() {
             <h2>Wallet</h2>
             <div className="wallet-balance-card">
               <p className="label">Available Balance</p>
-              <h2>{balance !== null ? `KES ${balance.toLocaleString()}` : "Loading..."}</h2>
+              <h2>{balance !== null ? `KES ${Number(balance).toLocaleString()}` : "Loading..."}</h2>
               <span className="sub">@{user?.username}</span>
             </div>
-
             <div className="wallet-actions-grid">
-              {/* DEPOSIT */}
               <div className="wallet-action-card">
                 <h3><FontAwesomeIcon icon={faMobileAlt} /> Deposit via M-Pesa</h3>
+                <p style={{ fontSize: "12px", opacity: 0.5, margin: "0 0 10px 0" }}>Free · Instant</p>
                 {depositStep === "idle" && (<>
                   <input className="wallet-input" type="number" placeholder="Amount (KES)"
                     value={depositAmount} onChange={e => setDepositAmount(e.target.value)} />
@@ -607,7 +950,7 @@ export default function App() {
                   <div className="wallet-processing">
                     <FontAwesomeIcon icon={faSpinner} spin style={{ fontSize: "28px", color: "#3b82f6" }} />
                     <p>Processing deposit...</p>
-                    <p style={{ opacity: 0.5, fontSize: "12px" }}>This may take a moment</p>
+                    <p style={{ opacity: 0.5, fontSize: "12px" }}>Please wait</p>
                   </div>
                 )}
                 {depositStep === "done" && (
@@ -617,12 +960,17 @@ export default function App() {
                 )}
               </div>
 
-              {/* WITHDRAW */}
               <div className="wallet-action-card">
                 <h3><FontAwesomeIcon icon={faMoneyBillWave} /> Withdraw to M-Pesa</h3>
+                <p style={{ fontSize: "12px", opacity: 0.5, margin: "0 0 10px 0" }}>1% fee · Min KES 5</p>
                 {withdrawStep === "idle" && (<>
                   <input className="wallet-input" type="number" placeholder="Amount (KES)"
                     value={withdrawAmount} onChange={e => setWithdrawAmount(e.target.value)} />
+                  {withdrawAmount && Number(withdrawAmount) > 0 && (
+                    <p style={{ fontSize: "12px", color: "#94a3b8" }}>
+                      Fee: KES {Math.max(Math.ceil(Number(withdrawAmount) * 0.01), 5)} · You receive: KES {Number(withdrawAmount).toLocaleString()}
+                    </p>
+                  )}
                   <p style={{ fontSize: "13px", opacity: 0.6 }}>Available: KES {balance?.toLocaleString() || 0}</p>
                   {msg.withdraw && <p className="form-error">{msg.withdraw}</p>}
                   <button className="wallet-action-btn withdraw-btn" onClick={handleWithdraw} disabled={!withdrawAmount}>
@@ -638,10 +986,89 @@ export default function App() {
                 )}
                 {withdrawStep === "done" && (
                   <div className="wallet-processing">
-                    <p className="form-success" style={{ fontSize: "16px" }}>✅ {msg.withdraw}</p>
+                    <p className="form-success" style={{ fontSize: "15px" }}>✅ {msg.withdraw}</p>
                   </div>
                 )}
               </div>
+            </div>
+
+            <div className="fee-info-card">
+              <h4>💡 NAFAKA Fee Structure</h4>
+              <div className="fee-table">
+                <div className="fee-row"><span>Deposits</span><strong className="pos">FREE</strong></div>
+                <div className="fee-row"><span>Withdrawals to M-Pesa</span><strong>1% (min KES 5)</strong></div>
+                <div className="fee-row"><span>Send to NAFAKA user</span><strong>0.5% (min KES 2)</strong></div>
+                <div className="fee-row"><span>Savings Vault</span><strong className="pos">FREE</strong></div>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {/* SAVINGS VAULT */}
+        {active === "Vault" && (
+          <section className="vault-section">
+            <h2>🏦 Savings Vault</h2>
+            <p style={{ opacity: 0.6, marginBottom: "20px" }}>
+              Lock your money away from daily spending. Set a savings goal and track your progress.
+            </p>
+
+            <div className="vault-balance-card">
+              <p className="label">Vault Balance</p>
+              <h2>KES {vaultBalance.toLocaleString()}</h2>
+              {vaultGoal && (
+                <div className="vault-goal-progress">
+                  <div className="vault-goal-label">
+                    <span>{vaultGoalName || "Savings Goal"}</span>
+                    <span>KES {vaultBalance.toLocaleString()} / KES {vaultGoal.toLocaleString()}</span>
+                  </div>
+                  <div className="vault-progress-bar">
+                    <div className="vault-progress-fill"
+                      style={{ width: `${Math.min((vaultBalance / vaultGoal) * 100, 100)}%` }} />
+                  </div>
+                  <span style={{ fontSize: "12px", opacity: 0.6 }}>
+                    {((vaultBalance / vaultGoal) * 100).toFixed(1)}% of goal reached
+                  </span>
+                </div>
+              )}
+            </div>
+
+            <div className="vault-actions">
+              <div className="wallet-action-card">
+                <h3>Move to Vault</h3>
+                <p style={{ fontSize: "12px", opacity: 0.5 }}>Transfer from wallet to vault · FREE</p>
+                <input className="wallet-input" type="number" placeholder="Amount (KES)"
+                  value={vaultForm.amount} onChange={e => setVaultForm({ ...vaultForm, amount: e.target.value })} />
+                <p style={{ fontSize: "13px", opacity: 0.6 }}>Wallet: KES {balance?.toLocaleString() || 0}</p>
+                {msg.vault && <p className={msg.vault.includes("failed") ? "form-error" : "form-success"}>{msg.vault}</p>}
+                <button className="wallet-action-btn deposit-btn" onClick={handleVaultDeposit}
+                  disabled={loading["vault-deposit"] || !vaultForm.amount}>
+                  {loading["vault-deposit"] ? <FontAwesomeIcon icon={faSpinner} spin /> : "Save to Vault"}
+                </button>
+              </div>
+
+              <div className="wallet-action-card">
+                <h3>Withdraw from Vault</h3>
+                <p style={{ fontSize: "12px", opacity: 0.5 }}>Transfer back to wallet · FREE</p>
+                <input className="wallet-input" type="number" placeholder="Amount (KES)"
+                  value={vaultForm.amount} onChange={e => setVaultForm({ ...vaultForm, amount: e.target.value })} />
+                <p style={{ fontSize: "13px", opacity: 0.6 }}>Vault: KES {vaultBalance.toLocaleString()}</p>
+                <button className="wallet-action-btn withdraw-btn" onClick={handleVaultWithdraw}
+                  disabled={loading["vault-withdraw"] || !vaultForm.amount}>
+                  {loading["vault-withdraw"] ? <FontAwesomeIcon icon={faSpinner} spin /> : "Withdraw from Vault"}
+                </button>
+              </div>
+            </div>
+
+            <div className="wallet-action-card" style={{ marginTop: "20px" }}>
+              <h3>🎯 Set Savings Goal</h3>
+              <input className="wallet-input" placeholder="Goal name (e.g. New Phone, Rent)"
+                value={vaultForm.goalName} onChange={e => setVaultForm({ ...vaultForm, goalName: e.target.value })} />
+              <input className="wallet-input" type="number" placeholder="Target amount (KES)"
+                value={vaultForm.goalAmount} onChange={e => setVaultForm({ ...vaultForm, goalAmount: e.target.value })} />
+              <button className="wallet-action-btn deposit-btn" onClick={handleVaultGoal}
+                disabled={loading["vault-goal"]}>
+                {loading["vault-goal"] ? "Saving..." : "Set Goal"}
+              </button>
             </div>
           </section>
         )}
@@ -649,25 +1076,43 @@ export default function App() {
         {/* TRANSACTIONS */}
         {active === "Transactions" && (
           <section className="transactions-section">
-            <h2>Transactions</h2>
+            <h2>Transaction History</h2>
             <div className="print-receipt-wrapper">
               <button className="print-receipt-btn" onClick={() => transactions[0] && handlePrintReceipt(transactions[0])}>
-                Print Latest Receipt
+                🖨️ Print Latest Receipt
               </button>
             </div>
             <div className="transactions-list">
               {transactions.map(tx => (
-                <div key={tx.id} className="tx" style={{ cursor: "pointer" }} onClick={() => handlePrintReceipt(tx)}>
-                  <div>
-                    <p>{tx.description}</p>
-                    <span>{new Date(tx.createdAt).toLocaleString("en-KE")} | TXN #{tx.id.slice(0, 8).toUpperCase()} | {tx.status}</span>
+                <div key={tx.id} className="tx-detail-item">
+                  <div className="tx-detail-header">
+                    <div className="tx-detail-left">
+                      <span className="tx-type-badge">{getTypeIcon(tx.type)} {getTypeLabel(tx.type)}</span>
+                      <strong className={isCredit(tx.type) ? "pos" : "neg"} style={{ fontSize: "18px" }}>
+                        {isCredit(tx.type) ? "+" : "-"}KES {tx.amount.toLocaleString()}
+                      </strong>
+                    </div>
+                    <div className="tx-detail-right">
+                      <span className="tx-status-badge completed">✅ Completed</span>
+                      <button className="print-mini-btn" onClick={() => handlePrintReceipt(tx)}>🖨️</button>
+                    </div>
                   </div>
-                  <strong className={isCredit(tx.type) ? "pos" : "neg"}>
-                    {isCredit(tx.type) ? "+" : "-"}KES {tx.amount.toLocaleString()}
-                  </strong>
+                  <div className="tx-detail-body">
+                    <div className="tx-detail-row"><span>Description</span><span>{tx.description}</span></div>
+                    {tx.counterparty && <div className="tx-detail-row"><span>Counterparty</span><span>{tx.counterparty}</span></div>}
+                    <div className="tx-detail-row"><span>Transaction Fee</span><span>KES {(tx.fee || 0).toLocaleString()}</span></div>
+                    <div className="tx-detail-row"><span>Total</span><span>KES {(tx.amount + (tx.fee || 0)).toLocaleString()}</span></div>
+                    <div className="tx-detail-row"><span>Date & Time</span><span>{new Date(tx.createdAt).toLocaleString("en-KE")}</span></div>
+                    <div className="tx-detail-row"><span>Reference</span><span>TXN#{tx.id.slice(0, 8).toUpperCase()}</span></div>
+                  </div>
                 </div>
               ))}
-              {transactions.length === 0 && <p style={{ opacity: 0.5 }}>No transactions yet</p>}
+              {transactions.length === 0 && (
+                <div className="empty-state">
+                  <p>No transactions yet</p>
+                  <span>Your transaction history will appear here</span>
+                </div>
+              )}
             </div>
           </section>
         )}
@@ -675,54 +1120,88 @@ export default function App() {
         {/* ANALYTICS */}
         {active === "Analytics" && (
           <section className="analytics-section">
-            <h2>Spending Overview</h2>
+            <h2>Spending Analytics</h2>
             {analytics ? (<>
               <div className="analytics-summary">
-                <div className="summary-card"><span>Total Deposited</span><strong className="pos">KES {Number(analytics.summary.totalDeposited).toLocaleString()}</strong></div>
-                <div className="summary-card"><span>Total Withdrawn</span><strong className="neg">KES {Number(analytics.summary.totalWithdrawn).toLocaleString()}</strong></div>
-                <div className="summary-card"><span>This Month</span><strong>KES {Number(analytics.summary.monthlySpend).toLocaleString()}</strong></div>
-                <div className="summary-card"><span>vs Last Month</span><strong>{analytics.summary.spendChange}%</strong></div>
+                <div className="summary-card">
+                  <span>Total Deposited</span>
+                  <strong className="pos">KES {Number(analytics.summary.totalDeposited).toLocaleString()}</strong>
+                </div>
+                <div className="summary-card">
+                  <span>Total Withdrawn</span>
+                  <strong className="neg">KES {Number(analytics.summary.totalWithdrawn).toLocaleString()}</strong>
+                </div>
+                <div className="summary-card">
+                  <span>This Month</span>
+                  <strong>KES {Number(analytics.summary.monthlySpend).toLocaleString()}</strong>
+                </div>
+                <div className="summary-card">
+                  <span>vs Last Month</span>
+                  <strong style={{ color: Number(analytics.summary.spendChange) > 0 ? "#ef4444" : "#22c55e" }}>
+                    {Number(analytics.summary.spendChange) > 0 ? "▲" : "▼"} {Math.abs(Number(analytics.summary.spendChange))}%
+                  </strong>
+                </div>
               </div>
+
               <div className="analytics-cards">
                 <div className="card">
                   <h3>Daily Spending</h3>
+                  <p style={{ fontSize: "12px", opacity: 0.5, margin: "0 0 15px 0" }}>Your spending activity this month</p>
                   {analytics.dailySpending.length > 0 ? (
-                    <ResponsiveContainer width="100%" height={200}>
-                      <AreaChart data={analytics.dailySpending}>
+                    <ResponsiveContainer width="100%" height={220}>
+                      <AreaChart data={analytics.dailySpending} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
                         <defs>
                           <linearGradient id="dailyGrad" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.4} />
-                            <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                            <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.5} />
+                            <stop offset="95%" stopColor="#3b82f6" stopOpacity={0.05} />
                           </linearGradient>
                         </defs>
                         <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                        <XAxis dataKey="date" tick={{ fill: "#94a3b8", fontSize: 10 }} />
-                        <YAxis tick={{ fill: "#94a3b8", fontSize: 10 }} />
-                        <Tooltip contentStyle={{ background: "#020617", border: "1px solid #1e293b", borderRadius: "8px" }} />
-                        <Area type="monotone" dataKey="amount" stroke="#3b82f6" fill="url(#dailyGrad)" strokeWidth={2} />
+                        <XAxis dataKey="date" tick={{ fill: "#94a3b8", fontSize: 10 }}
+                          tickFormatter={v => v.slice(5)} />
+                        <YAxis tick={{ fill: "#94a3b8", fontSize: 10 }}
+                          tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
+                        <Tooltip
+                          contentStyle={{ background: "#020617", border: "1px solid #1e293b", borderRadius: "8px" }}
+                          formatter={(v: number) => [`KES ${v.toLocaleString()}`, "Spent"]} />
+                        <Area type="monotone" dataKey="amount" stroke="#3b82f6"
+                          fill="url(#dailyGrad)" strokeWidth={2.5} dot={{ fill: "#3b82f6", r: 3 }} activeDot={{ r: 5 }} />
                       </AreaChart>
                     </ResponsiveContainer>
-                  ) : <div className="chart-placeholder">No spending data yet — make some transactions!</div>}
+                  ) : (
+                    <div className="chart-placeholder">
+                      Make some transactions to see your daily spending chart
+                    </div>
+                  )}
                 </div>
+
                 <div className="card">
                   <h3>Monthly Spending</h3>
+                  <p style={{ fontSize: "12px", opacity: 0.5, margin: "0 0 15px 0" }}>Your spending over the last 6 months</p>
                   {analytics.monthlySpending.length > 0 ? (
-                    <ResponsiveContainer width="100%" height={200}>
-                      <BarChart data={analytics.monthlySpending}>
+                    <ResponsiveContainer width="100%" height={220}>
+                      <BarChart data={analytics.monthlySpending} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
                         <defs>
                           <linearGradient id="barGrad" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor="#9333ea" stopOpacity={1} />
-                            <stop offset="100%" stopColor="#1d4ed8" stopOpacity={1} />
+                            <stop offset="0%" stopColor="#9333ea" stopOpacity={0.9} />
+                            <stop offset="100%" stopColor="#1d4ed8" stopOpacity={0.7} />
                           </linearGradient>
                         </defs>
                         <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
                         <XAxis dataKey="month" tick={{ fill: "#94a3b8", fontSize: 10 }} />
-                        <YAxis tick={{ fill: "#94a3b8", fontSize: 10 }} />
-                        <Tooltip contentStyle={{ background: "#020617", border: "1px solid #1e293b", borderRadius: "8px" }} />
-                        <Bar dataKey="amount" fill="url(#barGrad)" radius={[6, 6, 0, 0]} />
+                        <YAxis tick={{ fill: "#94a3b8", fontSize: 10 }}
+                          tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
+                        <Tooltip
+                          contentStyle={{ background: "#020617", border: "1px solid #1e293b", borderRadius: "8px" }}
+                          formatter={(v: number) => [`KES ${v.toLocaleString()}`, "Spent"]} />
+                        <Bar dataKey="amount" fill="url(#barGrad)" radius={[6, 6, 0, 0]} maxBarSize={60} />
                       </BarChart>
                     </ResponsiveContainer>
-                  ) : <div className="chart-placeholder">No monthly data yet</div>}
+                  ) : (
+                    <div className="chart-placeholder">
+                      No monthly data yet
+                    </div>
+                  )}
                 </div>
               </div>
             </>) : <p style={{ opacity: 0.5 }}>Loading analytics...</p>}
@@ -733,28 +1212,42 @@ export default function App() {
         {active === "Rewards" && (
           <section className="rewards-section">
             <h2>Rewards</h2>
+            <p style={{ opacity: 0.6, marginBottom: "20px" }}>
+              Earn rewards for using NAFAKA. Redeem them for cash credited directly to your wallet.
+            </p>
             <div className="rewards-list">
               {rewards.map(ur => (
-                <div key={ur.id} className="reward-card">
-                  <h3>{ur.reward.name}</h3>
-                  <p>{ur.reward.description}</p>
-                  <p style={{ color: "#3b82f6", fontSize: "13px", marginBottom: "10px" }}>
-                    {ur.reward.type === "POINTS" ? `${ur.reward.points} pts → KES ${Math.floor(ur.reward.points / 100)}` :
-                      ur.reward.type === "REFERRAL" ? `KES ${ur.reward.points}` : "5% of your total deposits"}
-                  </p>
-                  {msg[`reward-${ur.id}`] && (
-                    <p className={msg[`reward-${ur.id}`].includes("Failed") ? "form-error" : "form-success"}>
-                      {msg[`reward-${ur.id}`]}
+                <div key={ur.id} className={`reward-card ${ur.redeemed ? "redeemed" : ""}`}>
+                  <div className="reward-icon">
+                    {ur.reward.type === "POINTS" ? "🔋" : ur.reward.type === "REFERRAL" ? "🤝" : "💰"}
+                  </div>
+                  <div className="reward-content">
+                    <h3>{ur.reward.name}</h3>
+                    <p>{ur.reward.description}</p>
+                    <p className="reward-value">
+                      {ur.reward.type === "POINTS" ? `${ur.reward.points} pts → KES ${Math.floor(ur.reward.points / 100)}` :
+                        ur.reward.type === "REFERRAL" ? `KES ${ur.reward.points} cash` : "5% of your total deposits"}
                     </p>
-                  )}
-                  <button disabled={ur.redeemed || loading[`reward-${ur.id}`]}
-                    onClick={() => handleRedeemReward(ur.id)}
-                    style={{ opacity: ur.redeemed ? 0.5 : 1 }}>
-                    {ur.redeemed ? "✅ Redeemed" : loading[`reward-${ur.id}`] ? "..." : "Redeem"}
+                    {msg[`reward-${ur.id}`] && (
+                      <p className={msg[`reward-${ur.id}`].includes("Failed") || msg[`reward-${ur.id}`].includes("failed") ? "form-error" : "form-success"}>
+                        {msg[`reward-${ur.id}`]}
+                      </p>
+                    )}
+                  </div>
+                  <button
+                    className={`reward-btn ${ur.redeemed ? "redeemed-btn" : ""}`}
+                    disabled={ur.redeemed || loading[`reward-${ur.id}`]}
+                    onClick={() => handleRedeemReward(ur.id)}>
+                    {ur.redeemed ? "✅ Redeemed" : loading[`reward-${ur.id}`] ? <FontAwesomeIcon icon={faSpinner} spin /> : "Redeem"}
                   </button>
                 </div>
               ))}
-              {rewards.length === 0 && <p style={{ opacity: 0.5 }}>No rewards available yet</p>}
+              {rewards.length === 0 && (
+                <div className="empty-state">
+                  <p>No rewards available</p>
+                  <span>Rewards will appear here once your account is set up</span>
+                </div>
+              )}
             </div>
           </section>
         )}
@@ -767,7 +1260,7 @@ export default function App() {
             <div className="settings-list">
 
               <div className="setting-item setting-form">
-                <h4>Profile</h4>
+                <h4>👤 Profile</h4>
                 <input className="wallet-input" placeholder="Full Name"
                   value={profileForm.fullName} onChange={e => setProfileForm({ ...profileForm, fullName: e.target.value })} />
                 <input className="wallet-input" placeholder="Phone"
@@ -781,9 +1274,9 @@ export default function App() {
               </div>
 
               <div className="setting-item setting-form">
-                <h4>Spending Limits</h4>
+                <h4>💰 Spending Limits</h4>
                 <p style={{ fontSize: "13px", opacity: 0.6, margin: "0 0 10px 0" }}>
-                  Set limits to control your daily and monthly spending. Leave empty to remove a limit.
+                  Control your spending. You'll be warned at 80% and blocked at 100%.
                 </p>
                 {limits.dailyLimit && (
                   <p style={{ fontSize: "13px", color: "#3b82f6" }}>Current daily limit: KES {limits.dailyLimit.toLocaleString()}</p>
@@ -791,9 +1284,9 @@ export default function App() {
                 {limits.monthlyLimit && (
                   <p style={{ fontSize: "13px", color: "#3b82f6" }}>Current monthly limit: KES {limits.monthlyLimit.toLocaleString()}</p>
                 )}
-                <input className="wallet-input" type="number" placeholder="Daily Limit (KES)"
+                <input className="wallet-input" type="number" placeholder="Daily Limit (KES) — leave empty to remove"
                   value={limitsForm.dailyLimit} onChange={e => setLimitsForm({ ...limitsForm, dailyLimit: e.target.value })} />
-                <input className="wallet-input" type="number" placeholder="Monthly Limit (KES)"
+                <input className="wallet-input" type="number" placeholder="Monthly Limit (KES) — leave empty to remove"
                   value={limitsForm.monthlyLimit} onChange={e => setLimitsForm({ ...limitsForm, monthlyLimit: e.target.value })} />
                 {msg.limits && <p className="form-success">{msg.limits}</p>}
                 <button onClick={handleUpdateLimits} disabled={loading.limits}>
@@ -802,7 +1295,7 @@ export default function App() {
               </div>
 
               <div className="setting-item setting-form">
-                <h4>Security — Change Password</h4>
+                <h4>🔒 Security — Change Password</h4>
                 <input className="wallet-input" type="password" placeholder="Current Password"
                   value={securityForm.currentPassword} onChange={e => setSecurityForm({ ...securityForm, currentPassword: e.target.value })} />
                 <input className="wallet-input" type="password" placeholder="New Password"
@@ -814,12 +1307,14 @@ export default function App() {
               </div>
 
               <div className="setting-item">
-                <span>Email</span>
+                <span>📧 Email</span>
                 <span style={{ opacity: 0.6 }}>{profile?.email}</span>
               </div>
               <div className="setting-item">
-                <span>Account Created</span>
-                <span style={{ opacity: 0.6 }}>{profile ? new Date((profile as unknown as { createdAt: string }).createdAt).toLocaleDateString("en-KE") : ""}</span>
+                <span>📅 Account Created</span>
+                <span style={{ opacity: 0.6 }}>
+                  {profile ? new Date((profile as unknown as { createdAt: string }).createdAt).toLocaleDateString("en-KE") : ""}
+                </span>
               </div>
             </div>
           </section>
@@ -832,18 +1327,29 @@ export default function App() {
             <h2>Notifications</h2>
             <div className="notifications-list">
               {notifications.map(n => (
-                <div key={n.id} className={`notification-item ${!n.isRead ? "unread" : ""} notification-${n.type?.toLowerCase() || "info"}`}
-                  onClick={() => { if (n.type === "TRANSACTION" || n.type === "REQUEST") setActive("Transactions"); }}>
-                  <div>
+                <div key={n.id}
+                  className={`notification-item ${!n.isRead ? "unread" : ""} notification-${n.type?.toLowerCase() || "info"}`}
+                  onClick={() => {
+                    if (n.type === "TRANSACTION" || n.type === "REQUEST") setActive("Transactions");
+                  }}>
+                  <div className="notif-icon">
+                    {n.type === "WARNING" ? "⚠️" : n.type === "TRANSACTION" ? "💳" : n.type === "REQUEST" ? "📨" : "ℹ️"}
+                  </div>
+                  <div className="notif-content">
                     <p>{n.message}</p>
                     {(n.type === "TRANSACTION" || n.type === "REQUEST") && (
-                      <span style={{ color: "#3b82f6", fontSize: "12px" }}>View in Transactions →</span>
+                      <span className="notif-link">View in Transactions →</span>
                     )}
+                    <span className="notif-date">{new Date(n.createdAt).toLocaleString("en-KE")}</span>
                   </div>
-                  <span>{new Date(n.createdAt).toLocaleDateString("en-KE")}</span>
                 </div>
               ))}
-              {notifications.length === 0 && <p style={{ opacity: 0.5 }}>No notifications yet</p>}
+              {notifications.length === 0 && (
+                <div className="empty-state">
+                  <p>No notifications yet</p>
+                  <span>You'll be notified about transactions, warnings and updates here</span>
+                </div>
+              )}
             </div>
           </section>
         )}
@@ -856,22 +1362,23 @@ export default function App() {
           <div>
             <h4>Product</h4>
             <p style={{ cursor: "pointer" }} onClick={() => setActive("Wallet")}>Wallet</p>
+            <p style={{ cursor: "pointer" }} onClick={() => setActive("Vault")}>Savings Vault</p>
             <p style={{ cursor: "pointer" }} onClick={() => setActive("Analytics")}>Analytics</p>
             <p style={{ cursor: "pointer" }} onClick={() => setActive("Rewards")}>Rewards</p>
           </div>
           <div>
             <h4>Support</h4>
-            <p style={{ cursor: "pointer" }} onClick={() => setActive("Help")}>Help</p>
+            <p style={{ cursor: "pointer" }} onClick={() => setActive("Help")}>Help Center</p>
             <p style={{ cursor: "pointer" }} onClick={() => setActive("FAQs")}>FAQs</p>
-            <p style={{ cursor: "pointer" }} onClick={() => setActive("Contact")}>Contact</p>
+            <p style={{ cursor: "pointer" }} onClick={() => setActive("Contact")}>Contact Us</p>
           </div>
           <div>
             <h4>Legal</h4>
-            <p style={{ cursor: "pointer" }} onClick={() => setActive("Terms")}>Terms</p>
-            <p style={{ cursor: "pointer" }} onClick={() => setActive("Privacy")}>Privacy</p>
+            <p style={{ cursor: "pointer" }} onClick={() => setActive("Terms")}>Terms of Service</p>
+            <p style={{ cursor: "pointer" }} onClick={() => setActive("Privacy")}>Privacy Policy</p>
           </div>
         </div>
-        <p className="copyright">© 2026 NAFAKA Wallet</p>
+        <p className="copyright">© 2026 NAFAKA Wallet · All rights reserved</p>
       </footer>
 
       {/* FOOTER PAGES */}
@@ -880,11 +1387,12 @@ export default function App() {
           <div className="back-arrow" onClick={goBack}><FontAwesomeIcon icon={faArrowLeft} /> Back</div>
           <h2>Help Center</h2>
           <div className="help-list">
-            <div className="help-item"><h4>How do I deposit money?</h4><p>Click the Deposit button on your dashboard or wallet page, enter the amount and confirm. Funds are credited to your NAFAKA wallet.</p></div>
-            <div className="help-item"><h4>How do I withdraw money?</h4><p>Click the Withdraw button, enter the amount and confirm. Funds will be sent to your registered M-Pesa number.</p></div>
-            <div className="help-item"><h4>How do I send money to another user?</h4><p>Click Send on your dashboard, enter the recipient's NAFAKA username (e.g. @john_doe), enter the amount and confirm.</p></div>
-            <div className="help-item"><h4>How do I request money?</h4><p>Click Request on your dashboard, enter the NAFAKA username of the person you want to request from and the amount.</p></div>
-            <div className="help-item"><h4>How do spending limits work?</h4><p>Go to Settings → Spending Limits to set daily and monthly limits. You will be notified when you reach 80% of your limit.</p></div>
+            <div className="help-item"><h4>How do I deposit money?</h4><p>Go to Wallet → Deposit via M-Pesa. Enter the amount and confirm. Funds are credited instantly to your NAFAKA wallet at no charge.</p></div>
+            <div className="help-item"><h4>How do I withdraw money?</h4><p>Go to Wallet → Withdraw to M-Pesa. Enter the amount. A 1% fee applies (minimum KES 5). Funds are sent to your registered M-Pesa number.</p></div>
+            <div className="help-item"><h4>How do I send money to another user?</h4><p>Click Send on your dashboard and enter the recipient's NAFAKA username (e.g. @john_doe). A 0.5% fee applies (minimum KES 2).</p></div>
+            <div className="help-item"><h4>How do I request money?</h4><p>Click Request on your dashboard and enter the username of the person you want to request from. They will receive a notification.</p></div>
+            <div className="help-item"><h4>What is the Savings Vault?</h4><p>The Savings Vault lets you lock money away from daily spending. Set a savings goal and track your progress. Transfers to and from the vault are free.</p></div>
+            <div className="help-item"><h4>How do spending limits work?</h4><p>Go to Settings → Spending Limits to set daily and monthly limits. You will receive a warning notification at 80% usage and transactions will be blocked at 100%.</p></div>
             <div className="help-item"><h4>How do rewards work?</h4><p>Visit the Rewards page to see available rewards and redeem them for cash credited directly to your wallet.</p></div>
           </div>
         </div>
@@ -895,13 +1403,15 @@ export default function App() {
           <div className="back-arrow" onClick={goBack}><FontAwesomeIcon icon={faArrowLeft} /> Back</div>
           <h2>Frequently Asked Questions</h2>
           <div className="help-list">
-            <div className="help-item"><h4>Is NAFAKA safe?</h4><p>Yes. NAFAKA uses industry-standard encryption and JWT authentication to keep your account and funds secure.</p></div>
-            <div className="help-item"><h4>Are there transaction fees?</h4><p>NAFAKA currently charges no fees on deposits, withdrawals or transfers between users.</p></div>
+            <div className="help-item"><h4>Is NAFAKA safe?</h4><p>Yes. NAFAKA uses industry-standard JWT authentication and encrypted data storage to keep your account and funds secure at all times.</p></div>
+            <div className="help-item"><h4>What fees does NAFAKA charge?</h4><p>Deposits are free. Withdrawals to M-Pesa cost 1% (minimum KES 5). Sending to other NAFAKA users costs 0.5% (minimum KES 2). Savings Vault transfers are always free.</p></div>
+            <div className="help-item"><h4>Why does NAFAKA charge fees?</h4><p>Fees allow NAFAKA to maintain and improve the platform, provide customer support, and ensure the security of your funds.</p></div>
             <div className="help-item"><h4>What is the minimum deposit?</h4><p>The minimum deposit amount is KES 1.</p></div>
             <div className="help-item"><h4>How long do withdrawals take?</h4><p>Withdrawals are processed and funds are sent to your M-Pesa within minutes.</p></div>
-            <div className="help-item"><h4>Can I use NAFAKA without M-Pesa?</h4><p>Yes. You can send and receive money between NAFAKA users using only your username — no M-Pesa needed.</p></div>
-            <div className="help-item"><h4>What is my NAFAKA username?</h4><p>Your username is your unique identifier on NAFAKA. Other users can send or request money from you using your username e.g. @john_doe.</p></div>
-            <div className="help-item"><h4>How do I reset my password?</h4><p>Click "Forgot password?" on the login page and follow the instructions.</p></div>
+            <div className="help-item"><h4>Can I use NAFAKA without M-Pesa?</h4><p>Yes. You can send and receive money between NAFAKA users using only your username — no M-Pesa needed for peer-to-peer transfers.</p></div>
+            <div className="help-item"><h4>What is my NAFAKA username?</h4><p>Your username is your unique identifier on NAFAKA (e.g. @john_doe). Other users send or request money using your username.</p></div>
+            <div className="help-item"><h4>How do I reset my password?</h4><p>Click "Forgot password?" on the login page and follow the instructions sent to your email.</p></div>
+            <div className="help-item"><h4>Is there a spending limit?</h4><p>You can set your own daily and monthly spending limits in Settings for better financial control. NAFAKA will warn you at 80% and block transactions at 100%.</p></div>
           </div>
         </div>
       )}
@@ -911,10 +1421,11 @@ export default function App() {
           <div className="back-arrow" onClick={goBack}><FontAwesomeIcon icon={faArrowLeft} /> Back</div>
           <h2>Contact Us</h2>
           <div className="contact-card">
-            <p>We're here to help! Reach out to us and we'll respond within 24 hours.</p>
-            <div className="contact-item"><strong>Email:</strong> support@nafaka.co.ke</div>
-            <div className="contact-item"><strong>Support Hours:</strong> Monday – Friday, 8AM – 6PM EAT</div>
-            <div className="contact-item"><strong>Location:</strong> Nairobi, Kenya</div>
+            <p>We're here to help. Reach out and we'll respond within 24 hours on business days.</p>
+            <div className="contact-item"><strong>📧 Support Email:</strong> support@nafaka.co.ke</div>
+            <div className="contact-item"><strong>🕐 Support Hours:</strong> Monday – Friday, 8:00 AM – 6:00 PM EAT</div>
+            <div className="contact-item"><strong>📍 Location:</strong> Nairobi, Kenya</div>
+            <div className="contact-item"><strong>🌐 Website:</strong> nafaka-wallet.vercel.app</div>
           </div>
         </div>
       )}
@@ -925,22 +1436,22 @@ export default function App() {
           <h2>Terms of Service</h2>
           <div className="legal-content">
             <h4>1. Acceptance of Terms</h4>
-            <p>By using NAFAKA Wallet, you agree to these terms of service. Please read them carefully before using our platform.</p>
-            <h4>2. Use of Service</h4>
-            <p>NAFAKA Wallet is a digital wallet platform that allows users to deposit, withdraw, send and receive money. You must be 18 years or older to use this service.</p>
+            <p>By using NAFAKA Wallet, you agree to these terms. Please read them carefully before using our platform.</p>
+            <h4>2. Eligibility</h4>
+            <p>You must be 18 years or older to use NAFAKA Wallet. By registering, you confirm that you meet this requirement.</p>
             <h4>3. Account Security</h4>
-            <p>You are responsible for maintaining the security of your account. Do not share your password with anyone.</p>
+            <p>You are responsible for maintaining the security of your account credentials. Do not share your password with anyone.</p>
             <h4>4. Usernames</h4>
-            <p>Your NAFAKA username is unique and permanent. Choose it carefully as it is used by other users to send and request money from you.</p>
-            <h4>5. Transactions</h4>
-            <p>All transactions are final once confirmed. NAFAKA is not responsible for funds sent to incorrect usernames.</p>
+            <p>Your NAFAKA username is unique. Choose it carefully — it is used by other users to send and request money from you.</p>
+            <h4>5. Transactions & Fees</h4>
+            <p>Deposits are free. Withdrawals to M-Pesa incur a 1% fee (minimum KES 5). Sending to NAFAKA users incurs a 0.5% fee (minimum KES 2). All transactions are final once confirmed.</p>
             <h4>6. Spending Limits</h4>
-            <p>Users may set daily and monthly spending limits to control their usage. NAFAKA will enforce these limits and notify users when approaching them.</p>
-            <h4>7. Fees</h4>
-            <p>NAFAKA reserves the right to introduce transaction fees with prior notice to users.</p>
+            <p>Users may set daily and monthly spending limits. NAFAKA will enforce these limits and notify users when approaching them.</p>
+            <h4>7. Prohibited Use</h4>
+            <p>NAFAKA must not be used for money laundering, fraud, or any illegal activity. Suspicious transactions are monitored and flagged.</p>
             <h4>8. Termination</h4>
-            <p>NAFAKA reserves the right to suspend or terminate accounts that violate these terms.</p>
-            <p style={{ opacity: 0.5, marginTop: "20px", fontSize: "12px" }}>Last updated: January 2026</p>
+            <p>NAFAKA reserves the right to suspend accounts that violate these terms without prior notice.</p>
+            <p style={{ opacity: 0.5, marginTop: "20px", fontSize: "12px" }}>Last updated: April 2026</p>
           </div>
         </div>
       )}
@@ -951,18 +1462,20 @@ export default function App() {
           <h2>Privacy Policy</h2>
           <div className="legal-content">
             <h4>1. Information We Collect</h4>
-            <p>We collect your name, email address, phone number, username and transaction data when you use NAFAKA Wallet.</p>
+            <p>We collect your name, email, phone number, username and transaction data when you use NAFAKA Wallet.</p>
             <h4>2. How We Use Your Information</h4>
-            <p>Your information is used to operate your wallet, process transactions, send notifications and improve our service.</p>
+            <p>Your information is used to operate your wallet, process transactions, send notifications, detect fraud and improve our service.</p>
             <h4>3. Data Security</h4>
-            <p>We use industry-standard encryption to protect your personal data and financial information.</p>
+            <p>We use JWT authentication and encrypted storage to protect your personal and financial information.</p>
             <h4>4. Data Sharing</h4>
-            <p>We do not sell your personal data to third parties. We may share data with payment processors (M-Pesa) solely to process transactions.</p>
-            <h4>5. Your Rights</h4>
-            <p>You have the right to access, correct or delete your personal data. Contact us at support@nafaka.co.ke.</p>
-            <h4>6. Cookies</h4>
-            <p>NAFAKA uses local storage to maintain your session. No third-party cookies are used.</p>
-            <p style={{ opacity: 0.5, marginTop: "20px", fontSize: "12px" }}>Last updated: January 2026</p>
+            <p>We do not sell your personal data. We share data with M-Pesa only to process payment transactions.</p>
+            <h4>5. Fraud Detection</h4>
+            <p>We monitor transactions for unusual patterns to protect our users. Large or suspicious transactions may be reviewed by our team.</p>
+            <h4>6. Your Rights</h4>
+            <p>You may request access to, correction of, or deletion of your personal data by contacting support@nafaka.co.ke.</p>
+            <h4>7. Cookies & Storage</h4>
+            <p>NAFAKA uses browser local storage to maintain your session. No third-party tracking cookies are used.</p>
+            <p style={{ opacity: 0.5, marginTop: "20px", fontSize: "12px" }}>Last updated: April 2026</p>
           </div>
         </div>
       )}
