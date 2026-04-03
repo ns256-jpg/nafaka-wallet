@@ -1578,3 +1578,101 @@ body {
 
 .flagged-row { background: rgba(239, 68, 68, 0.05) !important; }
 .flagged-row:hover { background: rgba(239, 68, 68, 0.1) !important; }
+
+.admin-tx-grid {
+  grid-template-columns: 1.5fr 1fr 1fr 0.8fr 1fr 1.2fr !important;
+}
+
+.admin-users-grid {
+  grid-template-columns: 1.5fr 1fr 1.8fr 1fr 1fr 1fr !important;
+}
+
+.admin-tx-full-grid {
+  grid-template-columns: 1fr 1fr 1fr 0.8fr 1.5fr 1fr 1.2fr !important;
+}
+
+.admin-flagged-grid {
+  grid-template-columns: 1.5fr 1fr 1fr 2fr 1.5fr !important;
+}
+
+.admin-status-badge {
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.admin-status-badge.success {
+  background: #14532d;
+  color: #86efac;
+}
+
+.admin-status-badge.failed {
+  background: #450a0a;
+  color: #fca5a5;
+}
+
+.admin-risk-badge {
+  background: rgba(239, 68, 68, 0.1);
+  color: #fca5a5;
+  padding: 4px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.admin-search {
+  background: #1e293b;
+  border: 1px solid #334155;
+  color: white;
+  padding: 10px 15px;
+  border-radius: 8px;
+  font-size: 13px;
+  outline: none;
+  width: 320px;
+}
+
+.admin-search:focus { border-color: #3b82f6; }
+
+.admin-compliance-card {
+  background: #1e293b;
+  border-radius: 12px;
+  padding: 20px;
+  margin-top: 20px;
+  border-left: 3px solid #22c55e;
+}
+
+.admin-compliance-card h3 { margin: 0 0 15px 0; font-size: 15px; }
+
+.admin-compliance-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.compliance-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px;
+  background: #0f172a;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.compliance-item span { opacity: 0.7; }
+
+.admin-risk-rules {
+  background: #1e293b;
+  border-radius: 12px;
+  padding: 20px;
+  border-left: 3px solid #f59e0b;
+}
+
+.admin-risk-rules h4 {
+  margin: 0 0 15px 0;
+  color: #f59e0b;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}

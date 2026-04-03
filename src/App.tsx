@@ -116,7 +116,7 @@ function AuthScreen({ onAuth }: { onAuth: (token: string, user: User) => void })
         {mode === "register" && (<>
           <input className="auth-input" placeholder="Phone (e.g. 0712345678)"
             value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} />
-          <input className="auth-input" placeholder="Username (e.g. john_doe)"
+          <input className="auth-input" placeholder="Username (e.g. wanjiku.m79)"
             value={form.username} onChange={e => setForm({ ...form, username: e.target.value })} />
         </>)}
         {mode !== "forgot" && (
@@ -147,6 +147,8 @@ function AdminPanel({ onLogout }: { onLogout: () => void }) {
   const [allTransactions, setAllTransactions] = useState<Transaction[]>([]);
   const [flagged, setFlagged] = useState<{ id: string; type: string; amount: number; status: string; createdAt: string; user: { fullName: string; username: string }; reason: string }[]>([]);
   const [loading, setLoading] = useState(false);
+  const [searchUser, setSearchUser] = useState("");
+  const [searchTx, setSearchTx] = useState("");
 
   const fetchStats = useCallback(async () => {
     try { const d = await apiFetch("/admin/stats"); setStats(d); } catch {}
@@ -176,24 +178,55 @@ function AdminPanel({ onLogout }: { onLogout: () => void }) {
 
   const isCredit = (type: string) => ["DEPOSIT", "RECEIVE", "VAULT_WITHDRAWAL"].includes(type);
 
+  const filteredUsers = users.filter(u =>
+    u.fullName.toLowerCase().includes(searchUser.toLowerCase()) ||
+    u.username.toLowerCase().includes(searchUser.toLowerCase()) ||
+    u.email.toLowerCase().includes(searchUser.toLowerCase()) ||
+    u.phone.includes(searchUser)
+  );
+
+  const filteredTx = allTransactions.filter(tx =>
+    tx.user?.username?.toLowerCase().includes(searchTx.toLowerCase()) ||
+    tx.type.toLowerCase().includes(searchTx.toLowerCase()) ||
+    tx.description.toLowerCase().includes(searchTx.toLowerCase())
+  );
+
+  const getTypeColor = (type: string) => {
+    const colors: Record<string, string> = {
+      DEPOSIT: "#22c55e", WITHDRAWAL: "#ef4444", SEND: "#f59e0b",
+      RECEIVE: "#22c55e", VAULT_DEPOSIT: "#3b82f6", VAULT_WITHDRAWAL: "#3b82f6",
+    };
+    return colors[type] || "#94a3b8";
+  };
+
   return (
     <div className="admin-panel">
       {/* Admin Header */}
       <header className="admin-header">
         <div className="admin-logo">
-          <FontAwesomeIcon icon={faShieldAlt} style={{ color: "#ef4444" }} />
-          <span>NAFAKA Admin</span>
+          <FontAwesomeIcon icon={faShieldAlt} />
+          <div>
+            <span>NAFAKA Admin Console</span>
+            <p style={{ margin: 0, fontSize: "11px", opacity: 0.6, fontWeight: "normal" }}>
+              Secure Administrative Access
+            </p>
+          </div>
         </div>
-        <button className="logout" onClick={onLogout}>Logout</button>
+        <div style={{ display: "flex", alignItems: "center", gap: "15px" }}>
+          <span style={{ fontSize: "12px", opacity: 0.6 }}>
+            {new Date().toLocaleString("en-KE")}
+          </span>
+          <button className="logout" onClick={onLogout}>Logout</button>
+        </div>
       </header>
 
       {/* Admin Nav */}
       <div className="admin-nav">
         {[
           { key: "overview", icon: faChartLine, label: "Overview" },
-          { key: "users", icon: faUsers, label: "Users" },
+          { key: "users", icon: faUsers, label: `Users (${users.length || "..."})` },
           { key: "transactions", icon: faExchangeAlt, label: "Transactions" },
-          { key: "flagged", icon: faFlag, label: `Flagged ${stats?.flaggedCount ? `(${stats.flaggedCount})` : ""}` },
+          { key: "flagged", icon: faFlag, label: `🚨 Flagged ${stats?.flaggedCount ? `(${stats.flaggedCount})` : ""}` },
         ].map(tab => (
           <div key={tab.key}
             className={`admin-nav-item ${activeTab === tab.key ? "active" : ""}`}
@@ -206,97 +239,197 @@ function AdminPanel({ onLogout }: { onLogout: () => void }) {
 
       {/* Admin Content */}
       <main className="admin-main">
+
+        {/* OVERVIEW */}
         {activeTab === "overview" && stats && (
           <div>
-            <h2>System Overview</h2>
+            <div style={{ marginBottom: "25px" }}>
+              <h2 style={{ margin: "0 0 5px 0" }}>System Overview</h2>
+              <p style={{ margin: 0, opacity: 0.5, fontSize: "13px" }}>
+                Real-time platform metrics and transaction monitoring
+              </p>
+            </div>
+
             <div className="admin-stats-grid">
               <div className="admin-stat-card">
-                <span>Total Users</span>
+                <span>👥 Total Users</span>
                 <strong>{stats.totalUsers.toLocaleString()}</strong>
+                <p style={{ margin: 0, fontSize: "11px", color: "#22c55e" }}>Active accounts</p>
               </div>
               <div className="admin-stat-card">
-                <span>Total Transactions</span>
+                <span>💳 Total Transactions</span>
                 <strong>{stats.totalTransactions.toLocaleString()}</strong>
+                <p style={{ margin: 0, fontSize: "11px", opacity: 0.5 }}>All time</p>
               </div>
               <div className="admin-stat-card">
-                <span>Total Wallet Balance</span>
+                <span>💰 Total Wallet Balance</span>
                 <strong className="pos">KES {stats.totalWalletBalance.toLocaleString()}</strong>
+                <p style={{ margin: 0, fontSize: "11px", opacity: 0.5 }}>Across all users</p>
               </div>
               <div className="admin-stat-card">
-                <span>Total Volume</span>
+                <span>📊 Transaction Volume</span>
                 <strong>KES {stats.totalVolume.toLocaleString()}</strong>
+                <p style={{ margin: 0, fontSize: "11px", opacity: 0.5 }}>Total processed</p>
               </div>
-              <div className="admin-stat-card">
-                <span>Total Fees Earned</span>
+              <div className="admin-stat-card" style={{ borderLeft: "3px solid #22c55e" }}>
+                <span>💵 Platform Revenue</span>
                 <strong className="pos">KES {stats.totalFees.toLocaleString()}</strong>
+                <p style={{ margin: 0, fontSize: "11px", color: "#22c55e" }}>Fees collected</p>
               </div>
               <div className="admin-stat-card" style={{ borderLeft: "3px solid #ef4444" }}>
-                <span>Flagged Transactions</span>
+                <span>🚨 Flagged Transactions</span>
                 <strong className="neg">{stats.flaggedCount}</strong>
+                <p style={{ margin: 0, fontSize: "11px", color: "#ef4444" }}>Requires review</p>
               </div>
             </div>
 
-            <h3 style={{ marginTop: "30px" }}>Recent Transactions</h3>
-            <div className="admin-table">
-              <div className="admin-table-header">
-                <span>User</span>
-                <span>Type</span>
-                <span>Amount</span>
-                <span>Fee</span>
-                <span>Status</span>
-                <span>Date</span>
-              </div>
-              {stats.recentTransactions.map(tx => (
-                <div key={tx.id} className={`admin-table-row ${tx.flagged ? "flagged-row" : ""}`}>
-                  <span>@{tx.user?.username}</span>
-                  <span>{tx.type}</span>
-                  <span className={isCredit(tx.type) ? "pos" : "neg"}>
-                    {isCredit(tx.type) ? "+" : "-"}KES {tx.amount.toLocaleString()}
-                  </span>
-                  <span>KES {tx.fee.toLocaleString()}</span>
-                  <span className={tx.status === "SUCCESS" ? "pos" : "neg"}>{tx.status}</span>
-                  <span>{new Date(tx.createdAt).toLocaleDateString("en-KE")}</span>
+            {/* Compliance Summary */}
+            <div className="admin-compliance-card">
+              <h3>⚖️ Compliance & Risk Summary</h3>
+              <div className="admin-compliance-grid">
+                <div className="compliance-item">
+                  <span>Fraud Detection</span>
+                  <strong style={{ color: "#22c55e" }}>● Active</strong>
                 </div>
-              ))}
+                <div className="compliance-item">
+                  <span>Auto-Flag Threshold</span>
+                  <strong>KES 50,000+</strong>
+                </div>
+                <div className="compliance-item">
+                  <span>Spending Limit Enforcement</span>
+                  <strong style={{ color: "#22c55e" }}>● Enabled</strong>
+                </div>
+                <div className="compliance-item">
+                  <span>Transaction Logging</span>
+                  <strong style={{ color: "#22c55e" }}>● Full Audit Trail</strong>
+                </div>
+                <div className="compliance-item">
+                  <span>Data Encryption</span>
+                  <strong style={{ color: "#22c55e" }}>● JWT + bcrypt</strong>
+                </div>
+                <div className="compliance-item">
+                  <span>Rate Limiting</span>
+                  <strong style={{ color: "#22c55e" }}>● Active (100 req/15min)</strong>
+                </div>
+              </div>
+            </div>
+
+            {/* Recent Transactions */}
+            <div style={{ marginTop: "25px" }}>
+              <h3 style={{ marginBottom: "15px" }}>🕐 Recent Platform Activity</h3>
+              <div className="admin-table">
+                <div className="admin-table-header admin-tx-grid">
+                  <span>User</span>
+                  <span>Type</span>
+                  <span>Amount</span>
+                  <span>Fee</span>
+                  <span>Status</span>
+                  <span>Date</span>
+                </div>
+                {stats.recentTransactions.map(tx => (
+                  <div key={tx.id} className={`admin-table-row admin-tx-grid ${tx.flagged ? "flagged-row" : ""}`}>
+                    <span>
+                      <strong>@{tx.user?.username}</strong>
+                      {tx.flagged && <span style={{ color: "#ef4444", marginLeft: "5px" }}>🚨</span>}
+                    </span>
+                    <span style={{ color: getTypeColor(tx.type), fontWeight: 600 }}>{tx.type}</span>
+                    <span className={isCredit(tx.type) ? "pos" : "neg"}>
+                      {isCredit(tx.type) ? "+" : "-"}KES {tx.amount.toLocaleString()}
+                    </span>
+                    <span style={{ opacity: 0.7 }}>KES {tx.fee.toLocaleString()}</span>
+                    <span>
+                      <span className={`admin-status-badge ${tx.status === "SUCCESS" ? "success" : "failed"}`}>
+                        {tx.status}
+                      </span>
+                    </span>
+                    <span style={{ opacity: 0.6, fontSize: "12px" }}>
+                      {new Date(tx.createdAt).toLocaleString("en-KE")}
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         )}
 
+        {/* USERS */}
         {activeTab === "users" && (
           <div>
-            <h2>All Users ({users.length})</h2>
-            {loading ? <p>Loading...</p> : (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
+              <div>
+                <h2 style={{ margin: "0 0 5px 0" }}>User Management</h2>
+                <p style={{ margin: 0, opacity: 0.5, fontSize: "13px" }}>
+                  {filteredUsers.length} of {users.length} users
+                </p>
+              </div>
+              <input
+                className="admin-search"
+                placeholder="🔍 Search by name, username, email or phone..."
+                value={searchUser}
+                onChange={e => setSearchUser(e.target.value)}
+              />
+            </div>
+
+            {loading ? (
+              <div className="empty-state"><FontAwesomeIcon icon={faSpinner} spin /> Loading users...</div>
+            ) : (
               <div className="admin-table">
-                <div className="admin-table-header">
-                  <span>Name</span>
+                <div className="admin-table-header admin-users-grid">
+                  <span>Full Name</span>
                   <span>Username</span>
                   <span>Email</span>
                   <span>Phone</span>
                   <span>Balance</span>
                   <span>Joined</span>
                 </div>
-                {users.map(u => (
-                  <div key={u.id} className="admin-table-row">
-                    <span>{u.fullName}</span>
-                    <span>@{u.username}</span>
-                    <span>{u.email}</span>
-                    <span>{u.phone}</span>
-                    <span className="pos">KES {u.balance.toLocaleString()}</span>
-                    <span>{new Date(u.createdAt).toLocaleDateString("en-KE")}</span>
+                {filteredUsers.map(u => (
+                  <div key={u.id} className="admin-table-row admin-users-grid">
+                    <span><strong>{u.fullName}</strong></span>
+                    <span style={{ color: "#3b82f6" }}>@{u.username}</span>
+                    <span style={{ opacity: 0.7, fontSize: "12px" }}>{u.email}</span>
+                    <span style={{ opacity: 0.7 }}>{u.phone}</span>
+                    <span className={u.balance > 0 ? "pos" : ""}>
+                      KES {u.balance.toLocaleString()}
+                    </span>
+                    <span style={{ opacity: 0.6, fontSize: "12px" }}>
+                      {new Date(u.createdAt).toLocaleDateString("en-KE")}
+                    </span>
                   </div>
                 ))}
-                {users.length === 0 && <p style={{ padding: "20px", opacity: 0.5 }}>No users yet</p>}
+                {filteredUsers.length === 0 && (
+                  <div className="empty-state">
+                    <p>No users found</p>
+                    <span>{searchUser ? "Try a different search term" : "No users registered yet"}</span>
+                  </div>
+                )}
               </div>
             )}
           </div>
         )}
 
+        {/* TRANSACTIONS */}
         {activeTab === "transactions" && (
           <div>
-            <h2>All Transactions ({allTransactions.length})</h2>
-            {loading ? <p>Loading...</p> : (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
+              <div>
+                <h2 style={{ margin: "0 0 5px 0" }}>Transaction Ledger</h2>
+                <p style={{ margin: 0, opacity: 0.5, fontSize: "13px" }}>
+                  Complete audit trail — {filteredTx.length} of {allTransactions.length} transactions
+                </p>
+              </div>
+              <input
+                className="admin-search"
+                placeholder="🔍 Search by user, type or description..."
+                value={searchTx}
+                onChange={e => setSearchTx(e.target.value)}
+              />
+            </div>
+
+            {loading ? (
+              <div className="empty-state"><FontAwesomeIcon icon={faSpinner} spin /> Loading transactions...</div>
+            ) : (
               <div className="admin-table">
-                <div className="admin-table-header">
+                <div className="admin-table-header admin-tx-full-grid">
                   <span>User</span>
                   <span>Type</span>
                   <span>Amount</span>
@@ -305,50 +438,100 @@ function AdminPanel({ onLogout }: { onLogout: () => void }) {
                   <span>Status</span>
                   <span>Date</span>
                 </div>
-                {allTransactions.map(tx => (
-                  <div key={tx.id} className={`admin-table-row ${tx.flagged ? "flagged-row" : ""}`}>
-                    <span>@{tx.user?.username}</span>
-                    <span>{tx.type}</span>
+                {filteredTx.map(tx => (
+                  <div key={tx.id} className={`admin-table-row admin-tx-full-grid ${tx.flagged ? "flagged-row" : ""}`}>
+                    <span>
+                      <strong>@{tx.user?.username}</strong>
+                      {tx.flagged && <span style={{ color: "#ef4444" }}> 🚨</span>}
+                    </span>
+                    <span style={{ color: getTypeColor(tx.type), fontWeight: 600, fontSize: "12px" }}>{tx.type}</span>
                     <span className={isCredit(tx.type) ? "pos" : "neg"}>
                       {isCredit(tx.type) ? "+" : "-"}KES {tx.amount.toLocaleString()}
                     </span>
-                    <span>KES {tx.fee.toLocaleString()}</span>
-                    <span>{tx.description}</span>
-                    <span className={tx.status === "SUCCESS" ? "pos" : "neg"}>{tx.status}</span>
-                    <span>{new Date(tx.createdAt).toLocaleDateString("en-KE")}</span>
+                    <span style={{ opacity: 0.7 }}>KES {tx.fee.toLocaleString()}</span>
+                    <span style={{ opacity: 0.7, fontSize: "12px" }}>{tx.description}</span>
+                    <span>
+                      <span className={`admin-status-badge ${tx.status === "SUCCESS" ? "success" : "failed"}`}>
+                        {tx.status}
+                      </span>
+                    </span>
+                    <span style={{ opacity: 0.6, fontSize: "12px" }}>
+                      {new Date(tx.createdAt).toLocaleDateString("en-KE")}
+                    </span>
                   </div>
                 ))}
-                {allTransactions.length === 0 && <p style={{ padding: "20px", opacity: 0.5 }}>No transactions yet</p>}
+                {filteredTx.length === 0 && (
+                  <div className="empty-state">
+                    <p>No transactions found</p>
+                  </div>
+                )}
               </div>
             )}
           </div>
         )}
 
+        {/* FLAGGED */}
         {activeTab === "flagged" && (
           <div>
-            <h2>🚨 Flagged Transactions ({flagged.length})</h2>
-            <p style={{ opacity: 0.6, fontSize: "14px", marginBottom: "20px" }}>
-              Transactions above KES 50,000 are automatically flagged for review.
-            </p>
-            {loading ? <p>Loading...</p> : (
-              <div className="admin-table">
-                <div className="admin-table-header">
+            <div style={{ marginBottom: "20px" }}>
+              <h2 style={{ margin: "0 0 5px 0" }}>🚨 Fraud & Risk Detection</h2>
+              <p style={{ margin: 0, opacity: 0.5, fontSize: "13px" }}>
+                Transactions automatically flagged for review based on risk rules
+              </p>
+            </div>
+
+            <div className="admin-risk-rules">
+              <h4>Active Risk Rules</h4>
+              <div className="admin-compliance-grid">
+                <div className="compliance-item">
+                  <span>Large Transaction Flag</span>
+                  <strong style={{ color: "#f59e0b" }}>KES 50,000+</strong>
+                </div>
+                <div className="compliance-item">
+                  <span>Auto-Review</span>
+                  <strong style={{ color: "#22c55e" }}>● Enabled</strong>
+                </div>
+                <div className="compliance-item">
+                  <span>Flagged Count</span>
+                  <strong className="neg">{flagged.length}</strong>
+                </div>
+              </div>
+            </div>
+
+            {loading ? (
+              <div className="empty-state"><FontAwesomeIcon icon={faSpinner} spin /> Loading...</div>
+            ) : (
+              <div className="admin-table" style={{ marginTop: "20px" }}>
+                <div className="admin-table-header admin-flagged-grid">
                   <span>User</span>
                   <span>Type</span>
                   <span>Amount</span>
-                  <span>Reason</span>
+                  <span>Risk Reason</span>
                   <span>Date</span>
                 </div>
                 {flagged.map(tx => (
-                  <div key={tx.id} className="admin-table-row flagged-row">
-                    <span>@{tx.user?.username} ({tx.user?.fullName})</span>
-                    <span>{tx.type}</span>
-                    <span className="neg">KES {tx.amount.toLocaleString()}</span>
-                    <span style={{ color: "#f59e0b" }}>{tx.reason}</span>
-                    <span>{new Date(tx.createdAt).toLocaleDateString("en-KE")}</span>
+                  <div key={tx.id} className="admin-table-row admin-flagged-grid flagged-row">
+                    <span>
+                      <strong>@{tx.user?.username}</strong>
+                      <br />
+                      <span style={{ fontSize: "11px", opacity: 0.6 }}>{tx.user?.fullName}</span>
+                    </span>
+                    <span style={{ color: "#f59e0b", fontWeight: 600 }}>{tx.type}</span>
+                    <span className="neg" style={{ fontWeight: 700 }}>KES {tx.amount.toLocaleString()}</span>
+                    <span>
+                      <span className="admin-risk-badge">⚠️ {tx.reason}</span>
+                    </span>
+                    <span style={{ opacity: 0.6, fontSize: "12px" }}>
+                      {new Date(tx.createdAt).toLocaleString("en-KE")}
+                    </span>
                   </div>
                 ))}
-                {flagged.length === 0 && <p style={{ padding: "20px", opacity: 0.5 }}>No flagged transactions</p>}
+                {flagged.length === 0 && (
+                  <div className="empty-state">
+                    <p>✅ No flagged transactions</p>
+                    <span>All transactions are within normal parameters</span>
+                  </div>
+                )}
               </div>
             )}
           </div>
